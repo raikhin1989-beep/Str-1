@@ -72,16 +72,16 @@ app/                 → /opt/str-1/app
   models.py          доступ к данным, статусы, состав дегустации
   auth.py            вход в админку и защита от перебора
   admin.py           страницы админки
-  scoring.py         подсчёт очков — чистые функции      (шаг 8)
+  scoring.py         подсчёт очков — чистые функции, без базы
   ai.py              запросы к Anthropic API и кэш       (шаг 4)
   telegram.py        бот: привязка участников и рассылка
-  join.py            регистрация гостей, личная страница, раунды, вебхук, QR
+  join.py            регистрация, личная страница, раунды, итоги, экран, вебхук, QR
   migrations/        нумерованные .sql, применяются по порядку
   templates/         Jinja2, админка — в templates/admin/
 site/                → /var/www/str-1
   healthz            контракт проверки деплоя
   index.html         запасная страница на случай, когда приложение молчит
-  static/            app.css, round.js — их отдаёт Caddy файлами, не приложение
+  static/            app.css, round.js, board.js — их отдаёт Caddy, не приложение
   robots.txt
 docs/                документация
 tests/               pytest

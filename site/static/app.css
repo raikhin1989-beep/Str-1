@@ -230,3 +230,10 @@ button.link {
 select.dup { border-color: #a4543f; outline: 2px solid #a4543f; outline-offset: 1px; }
 
 input[type="range"] { padding: 0; accent-color: var(--amber); }
+
+/* ── экран ведущего ──────────────────────────────────────────────────────── */
+
+/* Таблицу читают с другого конца комнаты — здесь всё крупнее обычного. */
+.board .title { font-size: clamp(2.2rem, 6vw, 4rem); }
+.board-table { font-size: clamp(1rem, 2.4vw, 1.6rem); }
+.board-table td.num { font-size: 1.1em; }

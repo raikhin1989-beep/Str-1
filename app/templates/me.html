@@ -8,6 +8,30 @@
 
 {% if error %}<p class="msg msg-bad">{{ error }}</p>{% endif %}
 
+{% if result %}
+<section class="card">
+  <h2>Ваш результат: {{ result.total }} из {{ max_points }}</h2>
+  <p>Место {{ result.place }}. Нос {{ result.points_nose }}, вкус {{ result.points_palate }},
+     за класс {{ result.points_partial }}, бонусы {{ result.points_bonus }}.</p>
+
+  <table class="grid">
+    <thead><tr><th>№</th><th>Что было</th><th>Ваш нос</th><th>Ваш вкус</th><th>Баллы</th></tr></thead>
+    <tbody>
+      {% for s in score.samples %}
+      <tr>
+        <td class="num">{{ s.sample_no }}</td>
+        <td>{{ whiskies.get(s.truth_id, "—") }}</td>
+        <td>{% if s.nose_id == s.truth_id %}✓{% else %}{{ whiskies.get(s.nose_id, "—") }}{% endif %}</td>
+        <td>{% if s.palate_id == s.truth_id %}✓{% else %}{{ whiskies.get(s.palate_id, "—") }}{% endif %}</td>
+        <td class="num">{{ s.points }}{% if s.consistent %} <span class="hint">(с бонусом)</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="note"><a href="/results/{{ code }}">Общие итоги вечера →</a></p>
+</section>
+{% endif %}
+
 {% if round %}
   {% if submitted %}
   <section class="card">

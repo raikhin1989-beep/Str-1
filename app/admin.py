@@ -148,6 +148,10 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             "round_title": models.ROUND_TITLES.get(round_name, ""),
             "round_done": done,
             "round_total": total,
+            "scored": tasting["status"] in models.RESULT_STATUSES,
+            "board": models.leaderboard(tasting_id),
+            "results_url": str(request.base_url).rstrip("/") + f"/results/{tasting['public_code']}",
+            "board_url": str(request.base_url).rstrip("/") + f"/board/{tasting['public_code']}",
             "participants": models.list_participants(tasting_id),
             "join_url": join_url,
             "samples": in_tasting,
@@ -182,7 +186,21 @@ def change_status(tasting_id: int, status: str = Form(...)):
         models.set_status(tasting_id, status)
     except ValueError as err:
         return _redirect(f"/admin/tastings/{tasting_id}?error={err}")
+    # Переход к подсчёту сразу считает: иначе между «итоги подведены» и первым
+    # нажатием «пересчитать» страница итогов стояла бы пустой.
+    if status in models.RESULT_STATUSES:
+        models.compute_results(tasting_id)
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Статус изменён")
+
+
+@router.post("/tastings/{tasting_id}/recount", dependencies=[Depends(require_admin)])
+def recount(tasting_id: int):
+    """Пересчитать итоги. Таблица — кэш, поэтому жать можно сколько угодно."""
+    tasting = models.get_tasting(tasting_id)
+    if tasting is None or tasting["status"] not in models.RESULT_STATUSES:
+        return _redirect(f"/admin/tastings/{tasting_id}?error=Сначала подведите итоги")
+    models.compute_results(tasting_id)
+    return _redirect(f"/admin/tastings/{tasting_id}?ok=Пересчитано")
 
 
 @router.post("/tastings/{tasting_id}/samples", dependencies=[Depends(require_admin)])

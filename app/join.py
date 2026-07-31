@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from app import models, telegram
+from app import models, scoring, telegram
 
 log = logging.getLogger("str1.join")
 
@@ -67,6 +67,18 @@ def participant_page(request: Request, token: str, error: str = ""):
         "round": round_name,
         "error": error,
     }
+    if tasting["status"] in models.RESULT_STATUSES:
+        result = models.personal_result(participant["id"])
+        score = models.score_tasting(tasting["id"]).get(participant["id"])
+        whiskies = {row["id"]: row["name"] for row in models.round_choices(tasting["id"])}
+        context |= {
+            "result": result,
+            "score": score,
+            "whiskies": whiskies,
+            "max_points": scoring.max_points(len(models.sample_numbers(tasting["id"]))),
+            "code": tasting["public_code"],
+        }
+
     if round_name:
         answers = models.get_answers(participant["id"], round_name)
         ratings = models.get_ratings(participant["id"])
@@ -161,6 +173,71 @@ def _form_map(form, prefix: str) -> dict[int, int | None]:
         text = str(value).strip()
         result[int(key[len(prefix):])] = int(text) if text else None
     return result
+
+
+@router.get("/results/{code}")
+def results_page(request: Request, code: str):
+    """Итоги вечера. До подведения — только сообщение, что рано."""
+    tasting = models.get_tasting_by_code(code)
+    if tasting is None:
+        raise HTTPException(status_code=404, detail="Дегустация не найдена")
+    ready = tasting["status"] in models.RESULT_STATUSES
+    return templates.TemplateResponse(
+        request,
+        "results.html",
+        {
+            "tasting": tasting,
+            "ready": ready,
+            "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
+            "board": models.leaderboard(tasting["id"]) if ready else [],
+            "samples": models.sample_breakdown(tasting["id"]) if ready else [],
+            "best": models.whisky_of_the_night(tasting["id"]) if ready else None,
+            "max_points": scoring.max_points(len(models.sample_numbers(tasting["id"]))),
+            "code": code,
+        },
+    )
+
+
+@router.get("/board/{code}")
+def board_page(request: Request, code: str):
+    """Экран ведущего: та же таблица крупно, сама обновляется."""
+    tasting = models.get_tasting_by_code(code)
+    if tasting is None:
+        raise HTTPException(status_code=404, detail="Дегустация не найдена")
+    return templates.TemplateResponse(
+        request,
+        "board.html",
+        {"tasting": tasting, "code": code},
+    )
+
+
+@router.get("/api/board/{code}")
+def board_data(code: str):
+    """Данные для экрана ведущего. Пока идут раунды — счётчик сдавших."""
+    tasting = models.get_tasting_by_code(code)
+    if tasting is None:
+        raise HTTPException(status_code=404, detail="Дегустация не найдена")
+    round_name = models.open_round(tasting)
+    done, total = models.round_progress(tasting["id"], round_name) if round_name else (0, 0)
+    return {
+        "title": tasting["title"],
+        "status": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
+        "round": models.ROUND_TITLES.get(round_name),
+        "submitted": done,
+        "participants": total,
+        "rows": [
+            {
+                "place": row["place"],
+                "name": row["name"],
+                "nose": row["points_nose"],
+                "palate": row["points_palate"],
+                "partial": row["points_partial"],
+                "bonus": row["points_bonus"],
+                "total": row["total"],
+            }
+            for row in models.leaderboard(tasting["id"])
+        ],
+    }
 
 
 @router.get("/qr.svg")

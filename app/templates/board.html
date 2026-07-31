@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Экран — {{ tasting.title }}{% endblock %}
+
+{% block content %}
+<div class="board" data-source="/api/board/{{ code }}">
+  <h1 class="title">{{ tasting.title }}</h1>
+  <p class="lead" id="board-status">загружаем…</p>
+
+  <table class="grid board-table" id="board-table" hidden>
+    <thead>
+      <tr><th>Место</th><th>Кто</th><th>Нос</th><th>Вкус</th><th>Класс</th><th>Бонусы</th><th>Итого</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script src="/static/board.js" defer></script>
+{% endblock %}

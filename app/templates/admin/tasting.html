@@ -123,6 +123,41 @@
 </section>
 {% endif %}
 
+{% if scored %}
+<section class="card">
+  <h2>Итоги</h2>
+  {% if board %}
+  <table class="grid">
+    <thead><tr><th>Место</th><th>Кто</th><th>Нос</th><th>Вкус</th><th>Класс</th><th>Бонусы</th><th>Итого</th></tr></thead>
+    <tbody>
+      {% for row in board %}
+      <tr>
+        <td class="num">{{ row.place }}</td>
+        <td>{{ row.name }}</td>
+        <td class="num">{{ row.points_nose }}</td>
+        <td class="num">{{ row.points_palate }}</td>
+        <td class="num">{{ row.points_partial }}</td>
+        <td class="num">{{ row.points_bonus }}</td>
+        <td class="num"><strong>{{ row.total }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="note">Считать некого: никто не записался.</p>
+  {% endif %}
+
+  <p><a href="{{ results_url }}">Страница итогов для гостей</a> ·
+     <a href="{{ board_url }}">экран для проектора</a></p>
+
+  <form method="post" action="/admin/tastings/{{ tasting.id }}/recount" class="inline">
+    <button type="submit">Пересчитать</button>
+  </form>
+  <p class="note">Таблица итогов — кэш, а не источник истины: пересчёт всегда
+    делается из ответов заново, поэтому кнопку можно жать сколько угодно.</p>
+</section>
+{% endif %}
+
 {% if next_statuses %}
 <section class="card">
   <h2>Ход дегустации</h2>

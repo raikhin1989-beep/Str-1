@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Итоги — {{ tasting.title }}{% endblock %}
+
+{% block content %}
+<h1 class="title">{{ tasting.title }}</h1>
+
+{% if not ready %}
+<p class="lead">Итоги ещё не подведены — сейчас {{ status_title }}.</p>
+<section class="card">
+  <h2>Ещё рано</h2>
+  <p>Пока идут раунды, ответы и правильные названия закрыты ото всех, кроме
+     ведущего. Загляните сюда, когда он подведёт итоги.</p>
+</section>
+{% else %}
+<p class="lead">Итоги вечера</p>
+
+<section class="card">
+  <h2>Турнирная таблица</h2>
+  <table class="grid">
+    <thead>
+      <tr><th>Место</th><th>Кто</th><th>Нос</th><th>Вкус</th><th>Класс</th><th>Бонусы</th><th>Итого</th></tr>
+    </thead>
+    <tbody>
+      {% for row in board %}
+      <tr>
+        <td class="num">{{ row.place }}</td>
+        <td>{{ row.name }}</td>
+        <td class="num">{{ row.points_nose }}</td>
+        <td class="num">{{ row.points_palate }}</td>
+        <td class="num">{{ row.points_partial }}</td>
+        <td class="num">{{ row.points_bonus }}</td>
+        <td class="num"><strong>{{ row.total }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">Максимум при таком составе — {{ max_points }} баллов.
+     Нос дороже вкуса: вслепую попасть по запаху труднее.</p>
+</section>
+
+{% if best and best.whisky %}
+<section class="card">
+  <h2>Виски вечера</h2>
+  <p><strong>{{ best.whisky.name }}</strong> — образец №{{ best.sample_no }},
+     средняя оценка стола {{ best.average }} из 100.</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Что было в стаканах</h2>
+  <table class="grid">
+    <thead>
+      <tr><th>№</th><th>Что это было</th><th>Угадали по запаху</th><th>Угадали по вкусу</th><th>Оценка</th></tr>
+    </thead>
+    <tbody>
+      {% for s in samples %}
+      <tr>
+        <td class="num">{{ s.sample_no }}</td>
+        <td>{% if s.whisky %}<a href="/whisky/{{ s.whisky.id }}">{{ s.whisky.name }}</a>{% else %}—{% endif %}</td>
+        <td>{{ s.nose | join(", ") or "никто" }}</td>
+        <td>{{ s.palate | join(", ") or "никто" }}</td>
+        <td class="num">{{ s.average if s.average is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<p class="note"><a href="/board/{{ code }}">Экран для проектора →</a></p>
+{% endblock %}

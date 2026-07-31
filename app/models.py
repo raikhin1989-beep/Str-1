@@ -5,6 +5,7 @@ import random
 import secrets
 import sqlite3
 
+from app import scoring
 from app.db import connect
 
 # Машина состояний дегустации. Порядок жёсткий: раунд по вкусу не открыть,
@@ -521,6 +522,176 @@ def round_progress(tasting_id: int, round_name: str) -> tuple[int, int]:
             (tasting_id, round_name, tasting_id),
         ).fetchone()
     return int(row["done"] or 0), int(row["total"] or 0)
+
+
+# ── итоги ──────────────────────────────────────────────────────────────────
+
+RESULT_STATUSES = {"scoring", "closed"}
+
+
+def tasting_truth(tasting_id: int) -> dict[int, int]:
+    """Что налито на самом деле: номер образца → id виски."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT sample_no, whisky_id FROM tasting_whisky WHERE tasting_id = ?",
+            (tasting_id,),
+        ).fetchall()
+    return {row["sample_no"]: row["whisky_id"] for row in rows}
+
+
+def whisky_categories(tasting_id: int, level: str) -> dict[int, str | None]:
+    """Категория каждого виски дегустации — по классу или по региону."""
+    column = "region" if level == "region" else "wclass"
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT w.id, w.{column} AS value FROM tasting_whisky tw"
+            " JOIN whisky w ON w.id = tw.whisky_id WHERE tw.tasting_id = ?",
+            (tasting_id,),
+        ).fetchall()
+    return {row["id"]: row["value"] for row in rows}
+
+
+def palate_finished_at(tasting_id: int) -> dict[int, str | None]:
+    """Когда участник отправил второй раунд — это последний тай-брейк."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT a.participant_id, MAX(a.submitted_at) AS at FROM answer a"
+            " JOIN participant p ON p.id = a.participant_id"
+            " WHERE p.tasting_id = ? AND a.round = 'palate'"
+            " GROUP BY a.participant_id",
+            (tasting_id,),
+        ).fetchall()
+    return {row["participant_id"]: row["at"] for row in rows}
+
+
+def score_tasting(tasting_id: int) -> dict[int, scoring.Score]:
+    """Посчитать очки всех участников. Базу не меняет — только читает."""
+    tasting = get_tasting(tasting_id)
+    if tasting is None:
+        raise ValueError("дегустация не найдена")
+    truth = tasting_truth(tasting_id)
+    categories = whisky_categories(tasting_id, tasting["category_level"])
+    return {
+        person["id"]: scoring.score_participant(
+            truth,
+            {
+                "nose": get_answers(person["id"], "nose"),
+                "palate": get_answers(person["id"], "palate"),
+            },
+            categories,
+        )
+        for person in list_participants(tasting_id)
+    }
+
+
+def compute_results(tasting_id: int) -> None:
+    """Пересчитать таблицу итогов целиком.
+
+    `result` — кэш, а не источник истины: строки удаляются и пишутся заново,
+    поэтому кнопку «пересчитать» можно жать сколько угодно раз.
+    """
+    scores = score_tasting(tasting_id)
+    places = dict(scoring.rank(scores, palate_finished_at(tasting_id)))
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM result WHERE participant_id IN"
+            " (SELECT id FROM participant WHERE tasting_id = ?)",
+            (tasting_id,),
+        )
+        conn.executemany(
+            "INSERT INTO result (participant_id, points_nose, points_palate,"
+            " points_partial, points_bonus, total, place, computed_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [
+                (
+                    participant_id,
+                    score.points_nose,
+                    score.points_palate,
+                    score.points_partial,
+                    score.points_bonus,
+                    score.total,
+                    places[participant_id],
+                )
+                for participant_id, score in scores.items()
+            ],
+        )
+
+
+def leaderboard(tasting_id: int) -> list[sqlite3.Row]:
+    """Турнирная таблица. Пустая, пока итоги не посчитаны."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT p.id, p.name, p.tg_chat_id, r.* FROM participant p"
+            " JOIN result r ON r.participant_id = p.id"
+            " WHERE p.tasting_id = ? ORDER BY r.place, p.name COLLATE NOCASE",
+            (tasting_id,),
+        ).fetchall()
+
+
+def personal_result(participant_id: int) -> sqlite3.Row | None:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM result WHERE participant_id = ?", (participant_id,)
+        ).fetchone()
+
+
+def sample_breakdown(tasting_id: int) -> list[dict]:
+    """Разбор по образцам: что это было, кто угадал, как оценили."""
+    truth = tasting_truth(tasting_id)
+    whiskies = {row["id"]: row for row in tasting_whiskies(tasting_id)}
+    people = {person["id"]: person["name"] for person in list_participants(tasting_id)}
+    scores = score_tasting(tasting_id)
+    averages = average_scores(tasting_id)
+
+    rows = []
+    for sample_no in sorted(truth):
+        guessed = {"nose": [], "palate": []}
+        for participant_id, score in scores.items():
+            for result in score.samples:
+                if result.sample_no != sample_no:
+                    continue
+                if result.nose_id == result.truth_id:
+                    guessed["nose"].append(people[participant_id])
+                if result.palate_id == result.truth_id:
+                    guessed["palate"].append(people[participant_id])
+        rows.append(
+            {
+                "sample_no": sample_no,
+                "whisky": whiskies.get(truth[sample_no]),
+                "nose": sorted(guessed["nose"]),
+                "palate": sorted(guessed["palate"]),
+                "average": averages.get(sample_no),
+            }
+        )
+    return rows
+
+
+def average_scores(tasting_id: int) -> dict[int, float]:
+    """Средняя личная оценка образца — по ней выбирается «виски вечера»."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT r.sample_no, AVG(r.score) AS avg_score FROM rating r"
+            " JOIN participant p ON p.id = r.participant_id"
+            " WHERE p.tasting_id = ? AND r.score IS NOT NULL"
+            " GROUP BY r.sample_no",
+            (tasting_id,),
+        ).fetchall()
+    return {row["sample_no"]: round(row["avg_score"], 1) for row in rows}
+
+
+def whisky_of_the_night(tasting_id: int) -> dict | None:
+    """Образец с самой высокой средней оценкой. None, если никто не оценивал."""
+    averages = average_scores(tasting_id)
+    if not averages:
+        return None
+    sample_no = max(averages, key=lambda no: averages[no])
+    truth = tasting_truth(tasting_id)
+    whiskies = {row["id"]: row for row in tasting_whiskies(tasting_id)}
+    return {
+        "sample_no": sample_no,
+        "average": averages[sample_no],
+        "whisky": whiskies.get(truth.get(sample_no)),
+    }
 
 
 def _tasting_of(participant_id: int) -> int:
