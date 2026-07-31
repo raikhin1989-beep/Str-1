@@ -205,6 +205,25 @@ jobs:
             chmod a+r "$SITE_ROOT/version"
             echo "version: $GITHUB_SHA"
 
+      # Проверка с раннера, а не с сервера: на самом сервере сайт отвечал бы и
+      # при закрытом порте. Здесь же видно то, что увидит посетитель, — открыт
+      # ли 8081 наружу (ufw, файрвол хостинга) и доехал ли именно этот коммит.
+      - name: Verify from outside
+        run: |
+          set -e
+          base="http://$SERVER_ADDR:$SITE_PORT"
+          got=$(curl -fsS --max-time 20 "$base/version") || {
+            echo "::error::$base/version недоступен снаружи — проверьте, открыт ли порт $SITE_PORT"
+            exit 1
+          }
+          echo "version снаружи: $got"
+          [ "$got" = "$GITHUB_SHA" ] || {
+            echo "::error::на сервере лежит другой коммит: $got вместо $GITHUB_SHA"
+            exit 1
+          }
+          echo "healthz снаружи: $(curl -fsS --max-time 20 "$base/healthz")"
+          echo "сайт доступен: $base/"
+
   # ── INSPECT: только осмотреть сервер, ничего не менять ──────────────────────
   inspect:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'inspect' }}
