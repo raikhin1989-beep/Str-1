@@ -33,6 +33,9 @@ ANTHROPIC_MODEL = "claude-opus-5"
 # Yandex AI Studio, OpenAI-совместимый эндпоинт — тот же, которым пользуется
 # их официальный SDK (yandex-cloud/yandex-ai-studio-sdk).
 YANDEX_URL = "https://llm.api.cloud.yandex.net/v1/chat/completions"
+# Список моделей, доступных каталогу. Спрашиваем только когда в доступе отказали:
+# по нему сразу видно, открыта ли каталогу нужная модель вообще.
+YANDEX_MODELS_URL = "https://llm.api.cloud.yandex.net/v1/models"
 YANDEX_TEXT_MODEL = "yandexgpt"
 # Картинки на сегодня понимает только эта модель — так прямо сказано
 # в примере multimodal.py их SDK: «at this moment this is only model
@@ -288,9 +291,12 @@ def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
     # Схему просим параметром, но не полагаемся на неё: она поддержана не всеми
     # моделями семейства, и отказ из-за неё не должен ронять распознавание.
     # Инструкция в системном сообщении и терпимый разбор работают и без неё.
-    body = _yandex_post({**payload, "response_format": schema}, allow_retry=True)
-    if body is None:
-        body = _yandex_post(payload, allow_retry=False)
+    try:
+        body = _yandex_post({**payload, "response_format": schema}, allow_retry=True)
+        if body is None:
+            body = _yandex_post(payload, allow_retry=False)
+    except AiUnavailable as err:
+        raise _explain_refusal(err, model) from err
 
     try:
         text = body["choices"][0]["message"]["content"]
@@ -351,6 +357,55 @@ def _yandex_error_text(response) -> str:
         if body.get("message"):
             return str(body["message"])[:200]
     return str(body)[:200]
+
+
+def _explain_refusal(err: AiUnavailable, model: str) -> AiUnavailable:
+    """Дополнить отказ списком моделей, открытых каталогу.
+
+    «403 Forbidden» без тела не отличает «каталогу не открыта эта модель» от
+    «ключу не выдана роль». Список моделей отвечает на это сразу: если нужной
+    в нём нет — дело в модели, если есть — в правах.
+    """
+    text = str(err)
+    if " 403" not in text and " 404" not in text:
+        return err
+    available = _yandex_models()
+    if not available:
+        return err
+    return AiUnavailable(
+        f"{text} Модель {model}: "
+        + ("доступна каталогу, дело в правах ключа." if model in available
+           else "каталогу не открыта. Открытые: " + ", ".join(available[:15]))
+    )
+
+
+def _yandex_models() -> list[str]:
+    """Короткие имена моделей, доступных каталогу. Пустой список — не удалось узнать."""
+    import httpx
+
+    try:
+        response = httpx.get(
+            YANDEX_MODELS_URL,
+            headers={
+                "Authorization": f"Api-Key {yandex_key()}",
+                # Так каталог передаёт их собственный SDK: не в URI, а заголовком.
+                "OpenAI-Project": yandex_folder() or "",
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json().get("data", [])
+    except Exception:
+        log.exception("не удалось получить список моделей Яндекса")
+        return []
+    # id приходит целым URI gpt://<каталог>/<модель>/<версия> — оставляем модель:
+    # каталог в сообщении на странице ни к чему.
+    names = []
+    for item in data:
+        parts = str(item.get("id", "")).split("/")
+        if len(parts) >= 4:
+            names.append(parts[3])
+    return names
 
 
 def _parse_card(text: str) -> dict:

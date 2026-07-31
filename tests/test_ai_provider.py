@@ -114,6 +114,10 @@ class _Response:
             raise ValueError("не JSON")
         return self._payload
 
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
 
 def test_yandex_error_text_reaches_the_page(monkeypatch):
     """Без текста ошибки «403» не объясняет ничего: чинится оно по-разному."""
@@ -138,6 +142,37 @@ def test_non_json_error_body_is_shown_as_is(monkeypatch):
     with pytest.raises(ai.AiUnavailable) as err:
         ai._ask_yandex("что это?")
     assert "bad gateway" in str(err.value)
+
+
+def test_refusal_says_whether_the_model_is_open_to_the_folder(monkeypatch):
+    """403 без тела не отличает закрытую модель от недостающих прав — список отличает."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr("httpx.post", lambda *a, **kw: _Response(403, text="Forbidden"))
+    monkeypatch.setattr(
+        ai,
+        "_yandex_models",
+        lambda: ["yandexgpt", "yandexgpt-lite", "qwen3-235b-a22b-fp8"],
+    )
+
+    with pytest.raises(ai.AiUnavailable) as err:
+        ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert "gemma-3-27b-it" in str(err.value)
+    assert "не открыта" in str(err.value)
+    assert "yandexgpt-lite" in str(err.value)
+
+
+def test_model_list_keeps_only_names(monkeypatch):
+    """Идентификатор каталога в сообщение на странице попадать не должен."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gsecret")
+    monkeypatch.setattr(
+        "httpx.get",
+        lambda *a, **kw: _Response(
+            200, {"data": [{"id": "gpt://b1gsecret/yandexgpt/latest"}, {"id": "мусор"}]}
+        ),
+    )
+    assert ai._yandex_models() == ["yandexgpt"]
 
 
 CARD_JSON = {
