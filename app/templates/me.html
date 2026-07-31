@@ -20,6 +20,11 @@
     <p class="note" style="margin-top:0">Поставьте каждому образцу название. Одно
       название — одному образцу: повтор подсветится. Черновик сохраняется сам,
       «Отправить» закрывает ответ насовсем.</p>
+    {% if round == 'palate' %}
+    <p class="note" style="margin-top:.5rem">Что вы отвечали в раунде по запаху,
+      здесь не показано — намеренно. Совпадение двух ваших раундов приносит
+      отдельный балл, и подсказывать себе же было бы нечестно.</p>
+    {% endif %}
 
     <form method="post" action="/me/{{ token }}/submit" class="form" id="round"
           data-draft="/me/{{ token }}/draft">
@@ -35,9 +40,13 @@
           {% endfor %}
         </select>
 
-        <label for="tags_{{ no }}">Что чувствуете <span class="hint">(в зачёт не идёт)</span></label>
+        <label for="tags_{{ no }}">
+          {% if round == 'palate' %}Каков на вкус{% else %}Чем пахнет{% endif %}
+          <span class="hint">(в зачёт не идёт)</span>
+        </label>
         <input id="tags_{{ no }}" name="tags_{{ no }}" maxlength="200"
-               placeholder="торф, ваниль, сухофрукты" value="{{ tags.get(no, '') }}">
+               placeholder="{% if round == 'palate' %}сладкий, перец, долгое послевкусие{% else %}торф, ваниль, сухофрукты{% endif %}"
+               value="{{ tags.get(no, '') }}">
 
         <label for="score_{{ no }}">Насколько нравится: <output for="score_{{ no }}" id="out_{{ no }}">{{ ratings.get(no, {}).get('score') if ratings.get(no, {}).get('score') is not none else '—' }}</output></label>
         <input id="score_{{ no }}" name="score_{{ no }}" type="range" min="0" max="100" step="5"

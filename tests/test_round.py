@@ -188,3 +188,83 @@ def test_admin_sees_the_counter(admin, tasting):
     page = admin.get(f"/admin/tastings/{tasting['id']}").text
     assert "Раунд по запаху идёт" in page
     assert "1 из 2" in page
+
+
+# ── раунд по вкусу ─────────────────────────────────────────────────────────
+
+
+def test_palate_round_starts_empty(client, tasting):
+    """Свои ответы первого раунда участник видеть не должен: за совпадение даётся балл."""
+    token = tasting["tokens"][0]
+    ids = tasting["whiskies"]
+    client.post(f"/me/{token}/submit", data={f"sample_{n}": str(w) for n, w in zip((1, 2, 3), ids)})
+    models.set_status(tasting["id"], "round_palate")
+
+    page = client.get(f"/me/{token}").text
+    assert "Раунд по вкусу" in page
+    assert "selected" not in page, "ни один вариант не должен быть выбран заранее"
+    assert models.get_answers(tasting["people"][0], "palate") == {}
+
+
+def test_round_two_cannot_open_before_round_one(tasting):
+    """Прыгнуть из регистрации сразу во второй раунд нельзя."""
+    other = models.create_tasting("Вторая", None, "class")
+    models.set_status(other, "registration")
+    with pytest.raises(ValueError, match="не разрешён"):
+        models.set_status(other, "round_palate")
+
+
+def test_closing_a_round_freezes_unfinished_drafts(tasting):
+    """Забыл нажать «Отправить» — ответ всё равно засчитан, а не потерян."""
+    lazy = tasting["people"][1]
+    models.save_round_draft(lazy, "nose", dict(zip((1, 2, 3), tasting["whiskies"])))
+    assert models.round_submitted(lazy, "nose") is False
+
+    models.set_status(tasting["id"], "round_palate")
+    assert models.round_submitted(lazy, "nose") is True
+    assert models.get_answers(lazy, "nose") == dict(zip((1, 2, 3), tasting["whiskies"]))
+
+
+def test_a_frozen_draft_cannot_be_edited_afterwards(tasting):
+    me = tasting["people"][0]
+    models.save_round_draft(me, "nose", {1: tasting["whiskies"][0]})
+    models.set_status(tasting["id"], "round_palate")
+    with pytest.raises(ValueError, match="уже отправлен"):
+        models.save_round_draft(me, "nose", {1: tasting["whiskies"][1]})
+
+
+def test_palate_answers_are_independent(tasting):
+    """В двух раундах можно ответить по-разному — на то и бонус за постоянство."""
+    me = tasting["people"][0]
+    first, second, third = tasting["whiskies"]
+    models.save_round_draft(me, "nose", {1: first, 2: second, 3: third})
+    models.submit_round(me, "nose")
+    models.set_status(tasting["id"], "round_palate")
+
+    models.save_round_draft(me, "palate", {1: second, 2: first, 3: third})
+    models.submit_round(me, "palate")
+    assert models.get_answers(me, "nose") == {1: first, 2: second, 3: third}
+    assert models.get_answers(me, "palate") == {1: second, 2: first, 3: third}
+
+
+def test_tags_of_the_second_round_do_not_erase_the_first(client, tasting):
+    token = tasting["tokens"][0]
+    client.post(f"/me/{token}/draft", json={"tags": {"1": "торф и йод"}})
+    models.set_status(tasting["id"], "round_palate")
+    client.post(f"/me/{token}/draft", json={"tags": {"1": "дым и соль"}})
+
+    page = client.get(f"/me/{token}").text
+    assert "дым и соль" in page
+    assert "торф и йод" not in page, "теги запаха во втором раунде не показываем"
+    stored = models.get_ratings(tasting["people"][0])[1]["tags"]
+    assert "торф и йод" in stored and "дым и соль" in stored
+
+
+def test_admin_counter_follows_the_second_round(admin, tasting):
+    models.set_status(tasting["id"], "round_palate")
+    me = tasting["people"][0]
+    models.save_round_draft(me, "palate", dict(zip((1, 2, 3), tasting["whiskies"])))
+    models.submit_round(me, "palate")
+    page = admin.get(f"/admin/tastings/{tasting['id']}").text
+    assert "Раунд по вкусу идёт" in page
+    assert "1 из 2" in page

@@ -104,7 +104,13 @@ def update_tasting(tasting_id: int, title: str, held_on: str | None, category_le
 
 
 def set_status(tasting_id: int, new_status: str) -> None:
-    """Сменить статус, если такой переход разрешён."""
+    """Сменить статус, если такой переход разрешён.
+
+    Закрытие раунда замораживает и черновики: человек, который расставил
+    образцы, но не нажал «Отправить», не должен остаться вовсе без ответа.
+    Забыть кнопку на вечеринке — обычное дело, а восстановить ответ потом
+    уже нельзя.
+    """
     with connect() as conn:
         row = conn.execute("SELECT status FROM tasting WHERE id = ?", (tasting_id,)).fetchone()
         if row is None:
@@ -114,6 +120,14 @@ def set_status(tasting_id: int, new_status: str) -> None:
             raise ValueError(
                 f"переход «{STATUS_TITLES.get(current, current)}» → "
                 f"«{STATUS_TITLES.get(new_status, new_status)}» не разрешён"
+            )
+        closing = ROUND_BY_STATUS.get(current)
+        if closing:
+            conn.execute(
+                "UPDATE answer SET submitted_at = CURRENT_TIMESTAMP"
+                " WHERE round = ? AND submitted_at IS NULL AND participant_id IN"
+                "       (SELECT id FROM participant WHERE tasting_id = ?)",
+                (closing, tasting_id),
             )
         conn.execute("UPDATE tasting SET status = ? WHERE id = ?", (new_status, tasting_id))
 
