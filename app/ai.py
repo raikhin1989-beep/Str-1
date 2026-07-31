@@ -355,7 +355,21 @@ def normalise_card(card: dict) -> dict:
 
     confidence = (card.get("confidence") or "").strip().casefold()
     card["confidence"] = confidence if confidence in {"высокая", "средняя", "низкая"} else ""
+
+    # recognized обязано стать настоящим bool. Модель охотно присылает строку
+    # "false", а непустая строка в шаблоне истинна — страница уходила в ветку
+    # «узнал» с пустым названием вместо честного «не узнал».
+    card["recognized"] = _as_bool(card.get("recognized")) and bool(str(card.get("name") or "").strip())
     return card
+
+
+_FALSE_WORDS = {"", "false", "no", "нет", "0", "none", "null"}
+
+
+def _as_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().casefold() not in _FALSE_WORDS
+    return bool(value)
 
 
 def _only_number(value) -> str:

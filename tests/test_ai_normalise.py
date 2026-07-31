@@ -74,3 +74,20 @@ def test_cache_is_tidied_on_read(monkeypatch):
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
     ai._to_cache("name:старая запись", "text", {"name": "Laphroaig 10", "abv": "40%"})
     assert ai._from_cache("name:старая запись")["abv"] == "40"
+
+
+def test_recognized_as_string_false_is_really_false():
+    """Модель прислала строку "false"; в шаблоне она истинна — страница ломалась."""
+    card = ai.normalise_card({"recognized": "false", "name": "Гыгыгы Особая"})
+    assert card["recognized"] is False
+
+
+def test_recognized_without_a_name_is_false():
+    """«Узнал», но название пустое — на странице выходил пустой заголовок."""
+    assert ai.normalise_card({"recognized": True, "name": ""})["recognized"] is False
+    assert ai.normalise_card({"recognized": "true", "name": "  "})["recognized"] is False
+
+
+def test_recognized_stays_true_when_there_is_a_name():
+    assert ai.normalise_card({"recognized": "true", "name": "Laphroaig 10"})["recognized"] is True
+    assert ai.normalise_card({"recognized": True, "name": "Laphroaig 10"})["recognized"] is True
