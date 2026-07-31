@@ -311,18 +311,46 @@ def _yandex_post(payload: dict, allow_retry: bool) -> dict | None:
             headers={"Authorization": f"Api-Key {yandex_key()}"},
             timeout=90.0,
         )
-        if allow_retry and response.status_code == 400:
-            log.warning("Яндекс не принял response_format, повторяю без схемы")
-            return None
-        response.raise_for_status()
-        return response.json()
-    except AiUnavailable:
-        raise
     except Exception as err:
         log.exception("запрос к Яндексу не удался")
         raise AiUnavailable(
-            f"Не удалось получить ответ модели. {type(err).__name__}: {err}"[:300]
+            f"Не удалось связаться с Яндексом. {type(err).__name__}: {err}"[:300]
         ) from err
+
+    if allow_retry and response.status_code == 400:
+        log.warning("Яндекс не принял response_format, повторяю без схемы")
+        return None
+    if response.status_code >= 400:
+        # Текст ошибки показываем как есть: без него «403» ничего не объясняет,
+        # а чинится оно по-разному — не тот каталог, не выданная роль, не
+        # открытая модель. Ключ передаётся в заголовке запроса и в ответ
+        # не попадает, так что показывать тело безопасно.
+        log.error("Яндекс ответил %s: %s", response.status_code, response.text[:1000])
+        raise AiUnavailable(
+            f"Яндекс ответил {response.status_code}. {_yandex_error_text(response)}"[:300]
+        )
+    try:
+        return response.json()
+    except ValueError as err:
+        log.error("Яндекс вернул не JSON: %s", response.text[:500])
+        raise AiUnavailable("Яндекс вернул ответ неожиданной формы.") from err
+
+
+def _yandex_error_text(response) -> str:
+    """Вытащить человеческое объяснение из ответа об ошибке."""
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text.strip()[:200]
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            return str(error.get("message") or error)[:200]
+        if error:
+            return str(error)[:200]
+        if body.get("message"):
+            return str(body["message"])[:200]
+    return str(body)[:200]
 
 
 def _parse_card(text: str) -> dict:

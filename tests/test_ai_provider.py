@@ -101,6 +101,45 @@ def test_schema_refusal_falls_back_to_a_plain_request(monkeypatch):
     assert calls == [(True, True), (False, False)]
 
 
+class _Response:
+    """Минимальный двойник httpx.Response: нужны только эти четыре вещи."""
+
+    def __init__(self, status_code, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text if payload is None else json.dumps(payload, ensure_ascii=False)
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("не JSON")
+        return self._payload
+
+
+def test_yandex_error_text_reaches_the_page(monkeypatch):
+    """Без текста ошибки «403» не объясняет ничего: чинится оно по-разному."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(
+        "httpx.post",
+        lambda *a, **kw: _Response(403, {"error": {"message": "model is not available"}}),
+    )
+
+    with pytest.raises(ai.AiUnavailable) as err:
+        ai._ask_yandex("что это?")
+    assert "403" in str(err.value)
+    assert "model is not available" in str(err.value)
+
+
+def test_non_json_error_body_is_shown_as_is(monkeypatch):
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr("httpx.post", lambda *a, **kw: _Response(502, text="  bad gateway  "))
+
+    with pytest.raises(ai.AiUnavailable) as err:
+        ai._ask_yandex("что это?")
+    assert "bad gateway" in str(err.value)
+
+
 CARD_JSON = {
     "recognized": True, "name": "Laphroaig 10", "distillery": "Laphroaig",
     "wclass": "односолодовый скотч", "region": "Islay", "abv": "40",
