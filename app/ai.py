@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 
 from app.config import ai_provider, anthropic_key, yandex_folder, yandex_key
@@ -313,7 +314,56 @@ def _parse_card(text: str) -> dict:
     card.setdefault("recognized", bool(card.get("name")))
     for field in CARD_SCHEMA["required"]:
         card.setdefault(field, "")
+    return normalise_card(card)
+
+
+# Как модели называют классы виски на самом деле. Ключ — то, что встречается
+# в ответе, значение — наш словарь из models.WHISKY_CLASSES. Класс важен не
+# косметически: по нему начисляются частичные баллы (docs/SCORING.md).
+_CLASS_ALIASES = {
+    "single malt": "односолодовый скотч",
+    "односолодовый": "односолодовый скотч",
+    "односолодовый виски": "односолодовый скотч",
+    "solod": "односолодовый скотч",
+    "blended": "купажированный скотч",
+    "blend": "купажированный скотч",
+    "купаж": "купажированный скотч",
+    "купажированный": "купажированный скотч",
+    "bourbon": "бурбон",
+    "rye": "ржаной",
+    "ржаной виски": "ржаной",
+}
+
+
+def normalise_card(card: dict) -> dict:
+    """Причесать ответ модели до вида, пригодного для справочника.
+
+    Модель охотно пишет «40%», «10 лет», «около 8000 ₽» и «Single Malt».
+    Пока это только текст на карточке — неважно; но админ сохраняет карточку
+    в справочник, где крепость обязана быть числом, а класс — одним из наших,
+    иначе частичные баллы посчитаются неверно.
+    """
+    for field in ("abv", "age_years", "price_rub"):
+        card[field] = _only_number(card.get(field))
+
+    wclass = (card.get("wclass") or "").strip()
+    lowered = wclass.casefold()
+    for alias, ours in _CLASS_ALIASES.items():
+        if alias in lowered:
+            card["wclass"] = ours
+            break
+
+    confidence = (card.get("confidence") or "").strip().casefold()
+    card["confidence"] = confidence if confidence in {"высокая", "средняя", "низкая"} else ""
     return card
+
+
+def _only_number(value) -> str:
+    """Оставить от «около 41,5 %» одно число. Пусто, если чисел нет вовсе."""
+    if value is None:
+        return ""
+    match = re.search(r"\d+(?:[.,]\d+)?", str(value))
+    return match.group(0).replace(",", ".") if match else ""
 
 
 # ── кэш ────────────────────────────────────────────────────────────────────
@@ -334,8 +384,13 @@ def _to_cache(key: str, kind: str, card: dict) -> None:
 
 
 def cached_card(key: str) -> dict | None:
-    """Достать карточку по ключу кэша — нужно админке, чтобы её сохранить."""
-    return _from_cache(key)
+    """Достать карточку по ключу кэша — нужно админке, чтобы её сохранить.
+
+    Причёсываем и здесь: в кэше могли осесть ответы, полученные до появления
+    normalise_card, и админ не должен упираться в «крепость должна быть числом».
+    """
+    card = _from_cache(key)
+    return normalise_card(card) if card is not None else None
 
 
 def cache_key_for_name(query: str) -> str:
