@@ -370,9 +370,17 @@ def _only_number(value) -> str:
 
 
 def _from_cache(key: str) -> dict | None:
+    """Достать карточку из кэша.
+
+    Причёсываем на чтении, а не только при записи: в кэше осели ответы,
+    полученные до появления normalise_card, и показывать «40% %» из-за них
+    неправильно. Заодно причёсывание работает для всех путей сразу.
+    """
     with connect() as conn:
         row = conn.execute("SELECT payload FROM ai_cache WHERE key = ?", (key,)).fetchone()
-    return json.loads(row["payload"]) if row else None
+    if row is None:
+        return None
+    return normalise_card(json.loads(row["payload"]))
 
 
 def _to_cache(key: str, kind: str, card: dict) -> None:
@@ -384,13 +392,8 @@ def _to_cache(key: str, kind: str, card: dict) -> None:
 
 
 def cached_card(key: str) -> dict | None:
-    """Достать карточку по ключу кэша — нужно админке, чтобы её сохранить.
-
-    Причёсываем и здесь: в кэше могли осесть ответы, полученные до появления
-    normalise_card, и админ не должен упираться в «крепость должна быть числом».
-    """
-    card = _from_cache(key)
-    return normalise_card(card) if card is not None else None
+    """Достать карточку по ключу кэша — нужно админке, чтобы её сохранить."""
+    return _from_cache(key)
 
 
 def cache_key_for_name(query: str) -> str:

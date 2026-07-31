@@ -66,3 +66,11 @@ def test_raw_card_would_have_failed_to_save():
     """Тот же ответ без причёсывания — ошибка, которую увидел бы админ."""
     with pytest.raises(ValueError):
         models.save_whisky({"name": "Laphroaig 10", "abv": "40%"})
+
+
+def test_cache_is_tidied_on_read(monkeypatch):
+    """В кэше лежат ответы, записанные до причёсывания, — чинить их на чтении."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
+    ai._to_cache("name:старая запись", "text", {"name": "Laphroaig 10", "abv": "40%"})
+    assert ai._from_cache("name:старая запись")["abv"] == "40"
