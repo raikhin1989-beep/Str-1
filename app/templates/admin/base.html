@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Админка — дегустация виски{% endblock %}
+
+{% block content %}
+<nav class="adminnav">
+  <a href="/admin/tastings">Дегустации</a>
+  <a href="/admin/whiskies">Справочник виски</a>
+  <form method="post" action="/admin/logout" class="inline">
+    <button class="link" type="submit">Выйти</button>
+  </form>
+</nav>
+
+{% if error %}<p class="msg msg-bad">{{ error }}</p>{% endif %}
+{% if ok %}<p class="msg msg-ok">{{ ok }}</p>{% endif %}
+
+{% block admin %}{% endblock %}
+{% endblock %}

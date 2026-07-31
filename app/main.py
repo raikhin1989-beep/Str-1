@@ -10,6 +10,8 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 
+from app.admin import router as admin_router
+
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -21,6 +23,9 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+
+app.include_router(admin_router)
 
 
 @app.get("/api/health")

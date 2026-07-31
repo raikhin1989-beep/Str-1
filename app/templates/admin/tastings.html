@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+
+{% block admin %}
+<h1 class="title">Дегустации</h1>
+
+<form method="post" action="/admin/tastings" class="card form">
+  <h2>Новая дегустация</h2>
+  <label for="title">Название</label>
+  <input id="title" name="title" required placeholder="Дегустация 8 августа">
+
+  <label for="held_on">Дата</label>
+  <input id="held_on" name="held_on" type="date">
+
+  <label for="category_level">Частичные баллы засчитывать</label>
+  <select id="category_level" name="category_level">
+    {% for value, label in levels.items() %}
+      <option value="{{ value }}">{{ label }}</option>
+    {% endfor %}
+  </select>
+
+  <button type="submit">Создать</button>
+</form>
+
+{% if tastings %}
+<table class="grid">
+  <thead>
+    <tr><th>Название</th><th>Дата</th><th>Статус</th><th>Образцов</th><th>Участников</th></tr>
+  </thead>
+  <tbody>
+    {% for t in tastings %}
+    <tr>
+      <td><a href="/admin/tastings/{{ t.id }}">{{ t.title }}</a></td>
+      <td>{{ t.held_on or "—" }}</td>
+      <td>{{ statuses.get(t.status, t.status) }}</td>
+      <td>{{ t.sample_count }}</td>
+      <td>{{ t.participant_count }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="note">Дегустаций пока нет.</p>
+{% endif %}
+{% endblock %}

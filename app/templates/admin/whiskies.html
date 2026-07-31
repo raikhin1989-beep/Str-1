@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+
+{% block admin %}
+<h1 class="title">Справочник виски</h1>
+
+<form method="post" action="/admin/whiskies" class="card form">
+  <h2>Добавить виски</h2>
+  <label for="name">Название</label>
+  <input id="name" name="name" required placeholder="Aberlour 13 Double Cask Matured">
+
+  <label for="wclass">Класс — по нему считаются частичные баллы</label>
+  <select id="wclass" name="wclass">
+    {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+  </select>
+
+  <label for="region">Регион</label>
+  <input id="region" name="region" placeholder="Speyside">
+
+  <button type="submit">Добавить</button>
+  <p class="note">Остальные поля — крепость, ноты, цена — заполняются на странице виски.</p>
+</form>
+
+{% if whiskies %}
+<table class="grid">
+  <thead><tr><th>Название</th><th>Класс</th><th>Регион</th><th>Крепость</th><th>Откуда</th></tr></thead>
+  <tbody>
+    {% for w in whiskies %}
+    <tr>
+      <td><a href="/admin/whiskies/{{ w.id }}">{{ w.name }}</a></td>
+      <td>{{ w.wclass or "—" }}</td>
+      <td>{{ w.region or "—" }}</td>
+      <td>{{ w.abv or "—" }}</td>
+      <td>{{ "вручную" if w.source == "manual" else "ИИ" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="note">Справочник пуст.</p>
+{% endif %}
+{% endblock %}

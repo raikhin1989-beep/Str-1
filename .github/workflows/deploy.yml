@@ -33,6 +33,10 @@ name: Deploy to server
 #   SERVER_PORT       — порт SSH             [опционально, по умолчанию 22]
 #   DUCKDNS_SUBDOMAIN — метка поддомена      [для домена и HTTPS]
 #   DUCKDNS_TOKEN     — токен аккаунта DuckDNS [для домена и HTTPS]
+#   ADMIN_PASSWORD    — пароль админки       [без него /admin отвечает 503]
+#
+# Секреты попадают в приложение через /etc/str-1/app.env (права 600, владелец
+# str1) и в логи не пишутся: проверяется только факт наличия.
 
 on:
   push:
@@ -97,6 +101,7 @@ jobs:
       SERVER_SSH_PORT: ${{ secrets.SERVER_PORT || 22 }}
       # Контекст secrets недоступен в step-level if, поэтому раскрываем здесь.
       HAS_DUCKDNS: ${{ secrets.DUCKDNS_SUBDOMAIN != '' && secrets.DUCKDNS_TOKEN != '' }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
     steps:
       # Проверка до первого подключения: иначе про незаданный секрет узнаёшь из
       # невнятной ошибки ssh-action, а не из явного сообщения.
@@ -201,7 +206,8 @@ jobs:
             # Отдельный системный пользователь: приложение не должно ходить
             # от root, а база на шаге 2 будет принадлежать именно ему.
             id str1 >/dev/null 2>&1 || useradd --system --home-dir "$APP_ROOT" --shell /usr/sbin/nologin str1
-            mkdir -p "$APP_ROOT" /var/lib/str-1 /var/backups/str-1
+            mkdir -p "$APP_ROOT" /var/lib/str-1 /var/backups/str-1 /etc/str-1
+            chmod 750 /etc/str-1
             # Каталог данных вне докрута: /var/www/str-1 синхронизируется
             # с --delete и всё лишнее там стирается следующим выкатом.
             chown str1:str1 /var/lib/str-1
@@ -245,10 +251,26 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 10m
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
+
+            # Секреты приложению — через файл окружения, не через командную
+            # строку: аргументы процесса видны всем в /proc, файл — только
+            # владельцу. Значение никуда не печатаем, только факт наличия.
+            echo "=== секреты приложения ==="
+            umask 077
+            : > /etc/str-1/app.env
+            if [ -n "$ADMIN_PASSWORD" ]; then
+              printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD" >> /etc/str-1/app.env
+              echo "ADMIN_PASSWORD: задан (${#ADMIN_PASSWORD} символов)"
+            else
+              echo "::warning::ADMIN_PASSWORD не задан — админка будет отвечать 503"
+            fi
+            umask 022
+            chown root:str1 /etc/str-1/app.env
+            chmod 640 /etc/str-1/app.env
 
             # Приложение поднимаем ДО того, как Caddy начнёт на него проксировать:
             # иначе между переключением конфига и стартом службы посетитель
@@ -271,7 +293,11 @@ jobs:
             Group=str1
             WorkingDirectory=$APP_ROOT
             Environment=PYTHONUNBUFFERED=1
-            ExecStart=$APP_ROOT/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port $APP_PORT
+            EnvironmentFile=/etc/str-1/app.env
+            # proxy-headers: приложение узнаёт настоящий адрес посетителя и
+            # протокол из заголовков Caddy. Доверяем только localhost — снаружи
+            # в приложение никто не ходит.
+            ExecStart=$APP_ROOT/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port $APP_PORT --proxy-headers --forwarded-allow-ips 127.0.0.1
             Restart=always
             RestartSec=3
             NoNewPrivileges=yes
@@ -512,6 +538,10 @@ jobs:
             echo "HTTPS version:  $https_sha"
             echo "HTTPS healthz:  $(curl -fsS --max-time 20 "https://$SITE_DOMAIN/healthz")"
             echo "HTTPS api:      $(curl -fsS --max-time 20 "https://$SITE_DOMAIN/api/health")"
+            # 200 — пароль админки доехал до приложения, 503 — секрет не задан.
+            # Сам пароль при этом нигде не печатается.
+            admin_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$SITE_DOMAIN/admin/login")
+            echo "админка:        $admin_code $( [ "$admin_code" = "503" ] && echo '(ADMIN_PASSWORD не задан)' )"
             # Редирект с HTTP на HTTPS прописан явно — проверяем, что он живой.
             code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://$SITE_DOMAIN/")
             echo "http://$SITE_DOMAIN/ -> $code (ожидается 301)"
@@ -546,6 +576,8 @@ jobs:
             echo
             journalctl -u str-1-app --no-pager -n 15 2>/dev/null || true
             echo "=== база ==="; ls -la /var/lib/str-1 2>/dev/null || echo "каталога нет"
+            # Только права и размер: содержимое файла с секретами не печатаем.
+            echo "=== файл секретов ==="; ls -l /etc/str-1/app.env 2>/dev/null || echo "файла нет"
             echo "=== каталог Str-1 ==="; ls -la "$SITE_ROOT" 2>/dev/null || echo "каталога нет"
             echo "=== version ==="; cat "$SITE_ROOT/version" 2>/dev/null || echo "нет файла version"
             # Договорённость с репозиторием Str: без этой строки наш блок лежит

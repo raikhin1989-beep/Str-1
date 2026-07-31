@@ -1,0 +1,61 @@
+{% extends "admin/base.html" %}
+
+{% block admin %}
+<h1 class="title">{{ whisky.name }}</h1>
+
+<form method="post" action="/admin/whiskies/{{ whisky.id }}" class="card form">
+  <label for="name">Название</label>
+  <input id="name" name="name" value="{{ whisky.name }}" required>
+
+  <label for="distillery">Винокурня</label>
+  <input id="distillery" name="distillery" value="{{ whisky.distillery or '' }}">
+
+  <label for="wclass">Класс</label>
+  <select id="wclass" name="wclass">
+    <option value="">—</option>
+    {% for c in classes %}
+      <option value="{{ c }}" {% if whisky.wclass == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="region">Регион</label>
+  <input id="region" name="region" value="{{ whisky.region or '' }}">
+
+  <label for="abv">Крепость, %</label>
+  <input id="abv" name="abv" value="{{ whisky.abv or '' }}" inputmode="decimal">
+
+  <label for="age_years">Выдержка, лет</label>
+  <input id="age_years" name="age_years" value="{{ whisky.age_years or '' }}" inputmode="numeric">
+
+  <label for="cask">Бочка</label>
+  <input id="cask" name="cask" value="{{ whisky.cask or '' }}">
+
+  <label for="grain">Сырьё</label>
+  <input id="grain" name="grain" value="{{ whisky.grain or '' }}">
+
+  <label for="filtration">Холодная фильтрация</label>
+  <input id="filtration" name="filtration" value="{{ whisky.filtration or '' }}" placeholder="да / нет / неизвестно">
+
+  <label for="price_rub">Цена, ₽</label>
+  <input id="price_rub" name="price_rub" value="{{ whisky.price_rub or '' }}" inputmode="numeric">
+
+  <label for="colour">Цвет</label>
+  <input id="colour" name="colour" value="{{ whisky.colour or '' }}">
+
+  <label for="nose">Нос</label>
+  <textarea id="nose" name="nose" rows="2">{{ whisky.nose or '' }}</textarea>
+
+  <label for="palate">Вкус</label>
+  <textarea id="palate" name="palate" rows="2">{{ whisky.palate or '' }}</textarea>
+
+  <label for="finish">Послевкусие</label>
+  <textarea id="finish" name="finish" rows="2">{{ whisky.finish or '' }}</textarea>
+
+  <label for="notes">Заметки</label>
+  <textarea id="notes" name="notes" rows="2">{{ whisky.notes or '' }}</textarea>
+
+  <button type="submit">Сохранить</button>
+</form>
+
+<p class="note"><a href="/admin/whiskies">← ко всему справочнику</a></p>
+{% endblock %}

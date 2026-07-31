@@ -71,3 +71,104 @@ body {
 }
 
 a { color: var(--amber); }
+
+/* ── админка ─────────────────────────────────────────────────────────────── */
+
+.adminnav {
+  display: flex;
+  gap: 1.25rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--line);
+  font-size: .95rem;
+}
+
+.adminnav .inline { margin-left: auto; }
+
+.form { display: grid; gap: .35rem; margin-bottom: 1.5rem; }
+.form h2 { margin-bottom: .5rem; }
+.form label { color: var(--muted); font-size: .9rem; margin-top: .5rem; }
+
+.form.row {
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: .5rem;
+}
+
+input, select, textarea {
+  width: 100%;
+  padding: .6rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: .4rem;
+  background: #100e0c;
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;   /* меньше 16px — iOS зумит страницу при фокусе */
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+button {
+  margin-top: 1rem;
+  padding: .6rem 1.1rem;
+  border: 1px solid var(--amber);
+  border-radius: .4rem;
+  background: transparent;
+  color: var(--amber);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover { background: rgba(210, 156, 78, .12); }
+
+.form.row button { margin-top: 0; }
+
+.inline { display: inline-block; margin: 0 .5rem .5rem 0; }
+
+button.link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--amber);
+  text-decoration: underline;
+  font-size: inherit;
+}
+
+.grid {
+  width: 100%;
+  margin: 1rem 0;
+  border-collapse: collapse;
+  font-size: .95rem;
+}
+
+.grid th, .grid td {
+  padding: .5rem .6rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.grid th { color: var(--muted); font-weight: 400; }
+.grid td.num { color: var(--amber); font-variant-numeric: tabular-nums; }
+
+.msg {
+  margin: 0 0 1.25rem;
+  padding: .7rem .9rem;
+  border-radius: .4rem;
+  font-size: .95rem;
+}
+
+.msg-ok  { border: 1px solid #3c5a3a; background: #16200f; }
+.msg-bad { border: 1px solid #6b3a34; background: #241110; }
+
+/* Таблицы на телефоне шире экрана — пусть прокручиваются сами,
+   а не растягивают страницу. */
+@media (max-width: 34rem) {
+  .card { padding: 1rem; }
+  .grid { display: block; overflow-x: auto; white-space: nowrap; }
+}

@@ -1,0 +1,94 @@
+{% extends "admin/base.html" %}
+
+{% block admin %}
+<h1 class="title">{{ tasting.title }}</h1>
+<p class="lead">Статус: {{ statuses.get(tasting.status, tasting.status) }}</p>
+
+<section class="card">
+  <h2>Состав: {{ samples|length }} образцов</h2>
+  {% if samples %}
+  <table class="grid">
+    <thead><tr><th>№</th><th>Виски</th><th>Класс</th><th>Регион</th><th></th></tr></thead>
+    <tbody>
+      {% for s in samples %}
+      <tr>
+        <td class="num">{{ s.sample_no }}</td>
+        <td><a href="/admin/whiskies/{{ s.id }}">{{ s.name }}</a></td>
+        <td>{{ s.wclass or "—" }}</td>
+        <td>{{ s.region or "—" }}</td>
+        <td>
+          {% if editable %}
+          <form method="post" action="/admin/tastings/{{ tasting.id }}/samples/{{ s.id }}/remove" class="inline">
+            <button class="link" type="submit">убрать</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">Номера образцов видны только здесь. Участникам они не отдаются
+    ни на одной странице, пока не подведены итоги.</p>
+  {% else %}
+  <p class="note">Пока ничего не добавлено.</p>
+  {% endif %}
+
+  {% if editable %}
+    {% if samples %}
+    <form method="post" action="/admin/tastings/{{ tasting.id }}/shuffle" class="inline">
+      <button type="submit">Перемешать номера</button>
+    </form>
+    {% endif %}
+
+    {% if catalogue %}
+    <form method="post" action="/admin/tastings/{{ tasting.id }}/samples" class="form row">
+      <select name="whisky_id" aria-label="Виски из справочника">
+        {% for w in catalogue %}
+          <option value="{{ w.id }}">{{ w.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Добавить</button>
+    </form>
+    {% else %}
+    <p class="note">Справочник пуст или всё уже добавлено —
+      <a href="/admin/whiskies">завести виски</a>.</p>
+    {% endif %}
+  {% else %}
+    <p class="note">Состав заморожен: раунды начались.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Настройки</h2>
+  <form method="post" action="/admin/tastings/{{ tasting.id }}" class="form">
+    <label for="title">Название</label>
+    <input id="title" name="title" value="{{ tasting.title }}" required>
+
+    <label for="held_on">Дата</label>
+    <input id="held_on" name="held_on" type="date" value="{{ tasting.held_on or '' }}">
+
+    <label for="category_level">Частичные баллы засчитывать</label>
+    <select id="category_level" name="category_level">
+      {% for value, label in levels.items() %}
+        <option value="{{ value }}" {% if tasting.category_level == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="submit">Сохранить</button>
+  </form>
+</section>
+
+{% if next_statuses %}
+<section class="card">
+  <h2>Ход дегустации</h2>
+  {% for status in next_statuses %}
+  <form method="post" action="/admin/tastings/{{ tasting.id }}/status" class="inline">
+    <input type="hidden" name="status" value="{{ status }}">
+    <button type="submit">Перейти: {{ statuses.get(status, status) }}</button>
+  </form>
+  {% endfor %}
+</section>
+{% endif %}
+
+<p class="note"><a href="/admin/tastings">← ко всем дегустациям</a></p>
+{% endblock %}
