@@ -1,13 +1,14 @@
 """Регистрация гостей и привязка телеграма."""
 
 import io
+import json
 import logging
 from pathlib import Path
 
 import qrcode
 import qrcode.image.svg
 from fastapi import APIRouter, Form, Header, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app import models, telegram
@@ -49,22 +50,117 @@ def join(code: str, name: str = Form("")):
 
 
 @router.get("/me/{token}")
-def participant_page(request: Request, token: str):
+def participant_page(request: Request, token: str, error: str = ""):
     participant = models.get_participant_by_token(token)
     if participant is None:
         raise HTTPException(status_code=404, detail="Участник не найден")
     tasting = models.get_tasting(participant["tasting_id"])
-    return templates.TemplateResponse(
-        request,
-        "me.html",
-        {
-            "participant": participant,
-            "tasting": tasting,
-            "linked": participant["tg_chat_id"] is not None,
-            "deep_link": telegram.deep_link(token),
-            "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
-        },
-    )
+    round_name = models.open_round(tasting)
+
+    context = {
+        "participant": participant,
+        "tasting": tasting,
+        "linked": participant["tg_chat_id"] is not None,
+        "deep_link": telegram.deep_link(token),
+        "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
+        "token": token,
+        "round": round_name,
+        "error": error,
+    }
+    if round_name:
+        answers = models.get_answers(participant["id"], round_name)
+        ratings = models.get_ratings(participant["id"])
+        context |= {
+            "round_title": models.ROUND_TITLES[round_name],
+            "samples": models.sample_numbers(tasting["id"]),
+            "choices": models.round_choices(tasting["id"]),
+            "answers": answers,
+            "ratings": {no: dict(row) for no, row in ratings.items()},
+            "tags": {no: _tags_for(row, round_name) for no, row in ratings.items()},
+            "submitted": models.round_submitted(participant["id"], round_name),
+        }
+    return templates.TemplateResponse(request, "me.html", context)
+
+
+def _tags_for(rating, round_name: str) -> str:
+    try:
+        return json.loads(rating["tags"] or "{}").get(round_name, "")
+    except ValueError:
+        return ""
+
+
+def _participant_in_round(token: str):
+    """Участник, дегустация и открытый раунд — или отказ.
+
+    Раунд берётся из статуса дегустации: из формы его принимать нельзя,
+    иначе можно было бы отвечать во втором раунде, пока идёт первый.
+    """
+    participant = models.get_participant_by_token(token)
+    if participant is None:
+        raise HTTPException(status_code=404, detail="Участник не найден")
+    tasting = models.get_tasting(participant["tasting_id"])
+    round_name = models.open_round(tasting)
+    if round_name is None:
+        raise HTTPException(status_code=409, detail="Сейчас раунд не идёт")
+    return participant, round_name
+
+
+@router.post("/me/{token}/draft")
+async def save_draft(request: Request, token: str):
+    """Автосохранение черновика. Отвечает JSON — страница не перезагружается."""
+    participant, round_name = _participant_in_round(token)
+    payload = await request.json()
+    try:
+        models.save_round_draft(
+            participant["id"],
+            round_name,
+            _int_map(payload.get("answers")),
+            _int_map(payload.get("scores")),
+            {int(k): str(v) for k, v in (payload.get("tags") or {}).items()},
+        )
+    except ValueError as err:
+        return JSONResponse({"ok": False, "error": str(err)}, status_code=400)
+    return {"ok": True}
+
+
+@router.post("/me/{token}/submit")
+async def submit(request: Request, token: str):
+    """Отправка ответа. Форма присылает всё разом — на случай, если JS не сработал."""
+    participant, round_name = _participant_in_round(token)
+    form = await request.form()
+    try:
+        models.save_round_draft(
+            participant["id"],
+            round_name,
+            _form_map(form, "sample_"),
+            _form_map(form, "score_"),
+            {
+                int(key[len("tags_"):]): str(value)
+                for key, value in form.items()
+                if key.startswith("tags_")
+            },
+        )
+        models.submit_round(participant["id"], round_name)
+    except ValueError as err:
+        return RedirectResponse(f"/me/{token}?error={err}", status_code=303)
+    return RedirectResponse(f"/me/{token}", status_code=303)
+
+
+def _int_map(raw) -> dict[int, int | None]:
+    result: dict[int, int | None] = {}
+    for key, value in (raw or {}).items():
+        result[int(key)] = None if value in (None, "") else int(value)
+    return result
+
+
+def _form_map(form, prefix: str) -> dict[int, int | None]:
+    result: dict[int, int | None] = {}
+    for key, value in form.items():
+        if not key.startswith(prefix):
+            continue
+        text = str(value).strip()
+        result[int(key[len(prefix):])] = int(text) if text else None
+    return result
 
 
 @router.get("/qr.svg")

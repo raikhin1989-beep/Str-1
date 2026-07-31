@@ -204,3 +204,29 @@ button.link {
   .card { padding: 1rem; }
   .grid { display: block; overflow-x: auto; white-space: nowrap; }
 }
+
+/* ── раунд ───────────────────────────────────────────────────────────────── */
+
+.sample {
+  margin: 0 0 1.25rem;
+  padding: .9rem 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: .6rem;
+}
+
+.sample legend {
+  padding: 0 .4rem;
+  color: var(--amber);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+}
+
+.sample label { display: block; margin-top: .7rem; color: var(--muted); font-size: .9rem; }
+.sample .hint { font-size: .85em; }
+.sample output { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Повтор названия: подсвечиваем оба поля, а не только последнее — иначе
+   непонятно, с чем именно конфликт. */
+select.dup { border-color: #a4543f; outline: 2px solid #a4543f; outline-offset: 1px; }
+
+input[type="range"] { padding: 0; accent-color: var(--amber); }

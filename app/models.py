@@ -1,5 +1,6 @@
 """Работа с данными: дегустации, справочник виски, состав дегустации."""
 
+import json
 import random
 import secrets
 import sqlite3
@@ -332,6 +333,190 @@ def link_telegram(token: str, chat_id: int, username: str | None) -> sqlite3.Row
         return conn.execute(
             "SELECT * FROM participant WHERE id = ?", (participant["id"],)
         ).fetchone()
+
+
+# ── раунды ─────────────────────────────────────────────────────────────────
+
+ROUND_TITLES = {"nose": "по запаху", "palate": "по вкусу"}
+
+# Раунд определяется статусом дегустации, а не приходит из формы: иначе
+# участник мог бы отвечать во втором раунде, пока идёт первый.
+ROUND_BY_STATUS = {"round_nose": "nose", "round_palate": "palate"}
+
+MAX_TAGS_LENGTH = 200
+
+
+def open_round(tasting: sqlite3.Row) -> str | None:
+    return ROUND_BY_STATUS.get(tasting["status"])
+
+
+def round_choices(tasting_id: int) -> list[sqlite3.Row]:
+    """Названия для выпадающего списка — по алфавиту.
+
+    Сознательно не в порядке номеров образцов: список, идущий в том же порядке,
+    что и стаканы, сам по себе был бы ответом.
+    """
+    with connect() as conn:
+        return conn.execute(
+            "SELECT w.id, w.name FROM tasting_whisky tw"
+            " JOIN whisky w ON w.id = tw.whisky_id"
+            " WHERE tw.tasting_id = ? ORDER BY w.name COLLATE NOCASE",
+            (tasting_id,),
+        ).fetchall()
+
+
+def sample_numbers(tasting_id: int) -> list[int]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT sample_no FROM tasting_whisky WHERE tasting_id = ? ORDER BY sample_no",
+            (tasting_id,),
+        ).fetchall()
+    return [row["sample_no"] for row in rows]
+
+
+def get_answers(participant_id: int, round_name: str) -> dict[int, int]:
+    """Черновик или отправленный ответ: номер образца → id виски."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT sample_no, whisky_id FROM answer WHERE participant_id = ? AND round = ?",
+            (participant_id, round_name),
+        ).fetchall()
+    return {row["sample_no"]: row["whisky_id"] for row in rows}
+
+
+def round_submitted(participant_id: int, round_name: str) -> bool:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM answer"
+            " WHERE participant_id = ? AND round = ? AND submitted_at IS NOT NULL LIMIT 1",
+            (participant_id, round_name),
+        ).fetchone()
+    return row is not None
+
+
+def get_ratings(participant_id: int) -> dict[int, sqlite3.Row]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM rating WHERE participant_id = ?", (participant_id,)
+        ).fetchall()
+    return {row["sample_no"]: row for row in rows}
+
+
+def save_round_draft(
+    participant_id: int,
+    round_name: str,
+    answers: dict[int, int | None],
+    scores: dict[int, int | None] | None = None,
+    tags: dict[int, str] | None = None,
+) -> None:
+    """Сохранить черновик раунда целиком.
+
+    Ответы переписываются целиком, а не по одному: так не нужно бороться
+    с UNIQUE при перестановке двух названий местами — обычное дело, когда
+    участник передумал.
+    """
+    if round_submitted(participant_id, round_name):
+        raise ValueError("ответ уже отправлен, править нельзя")
+
+    tasting_id = _tasting_of(participant_id)
+    valid_samples = set(sample_numbers(tasting_id))
+    valid_whiskies = {row["id"] for row in round_choices(tasting_id)}
+
+    chosen: dict[int, int] = {}
+    for sample_no, whisky_id in answers.items():
+        if whisky_id is None:
+            continue
+        if sample_no not in valid_samples:
+            raise ValueError(f"нет образца №{sample_no}")
+        if whisky_id not in valid_whiskies:
+            raise ValueError("этого виски нет в составе дегустации")
+        chosen[sample_no] = whisky_id
+    if len(set(chosen.values())) != len(chosen):
+        raise ValueError("одно название нельзя поставить двум образцам")
+
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM answer WHERE participant_id = ? AND round = ?",
+            (participant_id, round_name),
+        )
+        conn.executemany(
+            "INSERT INTO answer (participant_id, round, sample_no, whisky_id) VALUES (?, ?, ?, ?)",
+            [(participant_id, round_name, no, wid) for no, wid in chosen.items()],
+        )
+        _save_ratings(conn, participant_id, round_name, valid_samples, scores or {}, tags or {})
+
+
+def _save_ratings(conn, participant_id, round_name, valid_samples, scores, tags) -> None:
+    """Личные оценки и теги. В зачёт не идут — это память о вечере.
+
+    Теги хранятся по раундам в одном JSON: по запаху и по вкусу они разные,
+    а строка в таблице на образец одна.
+    """
+    touched = set(scores) | set(tags)
+    for sample_no in touched:
+        if sample_no not in valid_samples:
+            continue
+        row = conn.execute(
+            "SELECT score, tags FROM rating WHERE participant_id = ? AND sample_no = ?",
+            (participant_id, sample_no),
+        ).fetchone()
+        score = scores.get(sample_no, row["score"] if row else None)
+        stored = {}
+        if row and row["tags"]:
+            try:
+                stored = json.loads(row["tags"])
+            except ValueError:
+                stored = {}
+        if sample_no in tags:
+            stored[round_name] = tags[sample_no][:MAX_TAGS_LENGTH]
+        conn.execute(
+            "INSERT INTO rating (participant_id, sample_no, score, tags) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT (participant_id, sample_no)"
+            " DO UPDATE SET score = excluded.score, tags = excluded.tags",
+            (participant_id, sample_no, score, json.dumps(stored, ensure_ascii=False)),
+        )
+
+
+def submit_round(participant_id: int, round_name: str) -> None:
+    """Заморозить ответ. После этого править нельзя — в этом и смысл кнопки."""
+    if round_submitted(participant_id, round_name):
+        raise ValueError("ответ уже отправлен")
+    tasting_id = _tasting_of(participant_id)
+    total = len(sample_numbers(tasting_id))
+    answers = get_answers(participant_id, round_name)
+    if len(answers) < total:
+        raise ValueError(f"заполнено {len(answers)} из {total} — ответьте на все образцы")
+    with connect() as conn:
+        conn.execute(
+            "UPDATE answer SET submitted_at = CURRENT_TIMESTAMP"
+            " WHERE participant_id = ? AND round = ?",
+            (participant_id, round_name),
+        )
+
+
+def round_progress(tasting_id: int, round_name: str) -> tuple[int, int]:
+    """Сколько человек сдали ответ и сколько всего записалось."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total,"
+            "       (SELECT COUNT(DISTINCT a.participant_id) FROM answer a"
+            "         JOIN participant p2 ON p2.id = a.participant_id"
+            "        WHERE p2.tasting_id = ? AND a.round = ? AND a.submitted_at IS NOT NULL"
+            "       ) AS done"
+            " FROM participant WHERE tasting_id = ?",
+            (tasting_id, round_name, tasting_id),
+        ).fetchone()
+    return int(row["done"] or 0), int(row["total"] or 0)
+
+
+def _tasting_of(participant_id: int) -> int:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT tasting_id FROM participant WHERE id = ?", (participant_id,)
+        ).fetchone()
+    if row is None:
+        raise ValueError("участник не найден")
+    return int(row["tasting_id"])
 
 
 def _require_editable(tasting_id: int) -> None:

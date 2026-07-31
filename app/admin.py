@@ -137,11 +137,17 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
     # Ссылку собираем из адреса запроса: домен приложение из конфига не знает,
     # а показать гостям надо ровно тот, по которому админ сейчас сидит.
     join_url = str(request.base_url).rstrip("/") + f"/join/{tasting['public_code']}"
+    round_name = models.open_round(tasting)
+    done, total = models.round_progress(tasting_id, round_name) if round_name else (0, 0)
     return templates.TemplateResponse(
         request,
         "admin/tasting.html",
         {
             "tasting": tasting,
+            "round": round_name,
+            "round_title": models.ROUND_TITLES.get(round_name, ""),
+            "round_done": done,
+            "round_total": total,
             "participants": models.list_participants(tasting_id),
             "join_url": join_url,
             "samples": in_tasting,

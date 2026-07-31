@@ -6,6 +6,55 @@
 <h1 class="title">{{ participant.name }}</h1>
 <p class="lead">{{ tasting.title }} — {{ status_title }}</p>
 
+{% if error %}<p class="msg msg-bad">{{ error }}</p>{% endif %}
+
+{% if round %}
+  {% if submitted %}
+  <section class="card">
+    <h2>Ответ принят ✓</h2>
+    <p>Раунд {{ round_title }} вы прошли. Ждём остальных — правки уже закрыты.</p>
+  </section>
+  {% else %}
+  <section class="card">
+    <h2>Раунд {{ round_title }}</h2>
+    <p class="note" style="margin-top:0">Поставьте каждому образцу название. Одно
+      название — одному образцу: повтор подсветится. Черновик сохраняется сам,
+      «Отправить» закрывает ответ насовсем.</p>
+
+    <form method="post" action="/me/{{ token }}/submit" class="form" id="round"
+          data-draft="/me/{{ token }}/draft">
+      {% for no in samples %}
+      <fieldset class="sample">
+        <legend>Образец {{ no }}</legend>
+
+        <label for="sample_{{ no }}">Что это, по-вашему</label>
+        <select id="sample_{{ no }}" name="sample_{{ no }}" data-answer>
+          <option value="">— не выбрано —</option>
+          {% for w in choices %}
+            <option value="{{ w.id }}" {% if answers.get(no) == w.id %}selected{% endif %}>{{ w.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="tags_{{ no }}">Что чувствуете <span class="hint">(в зачёт не идёт)</span></label>
+        <input id="tags_{{ no }}" name="tags_{{ no }}" maxlength="200"
+               placeholder="торф, ваниль, сухофрукты" value="{{ tags.get(no, '') }}">
+
+        <label for="score_{{ no }}">Насколько нравится: <output for="score_{{ no }}" id="out_{{ no }}">{{ ratings.get(no, {}).get('score') if ratings.get(no, {}).get('score') is not none else '—' }}</output></label>
+        <input id="score_{{ no }}" name="score_{{ no }}" type="range" min="0" max="100" step="5"
+               value="{{ ratings.get(no, {}).get('score') if ratings.get(no, {}).get('score') is not none else 50 }}"
+               oninput="document.getElementById('out_{{ no }}').value = this.value">
+      </fieldset>
+      {% endfor %}
+
+      <p class="note" id="draft-state" aria-live="polite"></p>
+      <button type="submit">Отправить ответ</button>
+      <p class="note" style="margin-top:.5rem">После отправки изменить ответ не получится.</p>
+    </form>
+  </section>
+  <script src="/static/round.js" defer></script>
+  {% endif %}
+{% endif %}
+
 {% if linked %}
 <section class="card">
   <h2>Телеграм привязан ✓</h2>

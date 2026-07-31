@@ -108,6 +108,20 @@
   {% endif %}
 </section>
 
+{% if round %}
+<section class="card">
+  <h2>Раунд {{ round_title }} идёт</h2>
+  <p>Сдали ответ: <strong>{{ round_done }} из {{ round_total }}</strong>.</p>
+  <p class="note" style="margin-top:.5rem">Кто ещё не отправил — может править
+    черновик. Отправленный ответ заморожен. Что налито на самом деле, участники
+    не видят нигде до подведения итогов.</p>
+  {% if round_total and round_done < round_total %}
+  <p class="note">Закрывать раунд можно и раньше: те, кто не отправил, останутся
+    с незасчитанным черновиком.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if next_statuses %}
 <section class="card">
   <h2>Ход дегустации</h2>
