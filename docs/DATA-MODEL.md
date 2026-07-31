@@ -26,7 +26,7 @@ SQLite, файл `/var/lib/str-1/app.db`, режим WAL. Схема созда�
 | `id` | int pk | |
 | `name` | text | «Aberlour 13 Double Cask» |
 | `distillery` | text | |
-| `wclass` | text | односолодовый скотч / купажированный скотч / бурбон / ржаной / прочее |
+| `wclass` | text | односолодовый скотч / купажированный скотч / односолодовый (не Шотландия) / бурбон / теннесси / ржаной / прочее |
 | `region` | text | Speyside, Highland, Tennessee… |
 | `abv` | real | крепость, % |
 | `age_years` | int | null для без возраста (NAS) |
