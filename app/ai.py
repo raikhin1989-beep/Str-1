@@ -11,10 +11,13 @@
 
 import hashlib
 import json
+import logging
 import os
 import time
 
 from app.db import connect
+
+log = logging.getLogger("str1.ai")
 
 MODEL = "claude-opus-5"
 
@@ -189,7 +192,13 @@ def _ask(messages: list[dict]) -> dict:
             },
         )
     except Exception as err:
-        raise AiUnavailable("Не удалось получить ответ модели. Попробуйте ещё раз.") from err
+        # Полная трасса уходит в журнал службы (journalctl -u str-1-app),
+        # на странице показываем короткую причину: без неё «попробуйте ещё раз»
+        # ничего не говорит ни гостю, ни тому, кто чинит. Ключ в текст ошибок
+        # Anthropic не попадает.
+        log.exception("запрос к модели не удался")
+        reason = f"{type(err).__name__}: {err}"
+        raise AiUnavailable(f"Не удалось получить ответ модели. {reason[:300]}") from err
 
     if response.stop_reason == "refusal":
         raise AiUnavailable("Модель отказалась отвечать на этот запрос.")
