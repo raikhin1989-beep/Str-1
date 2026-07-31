@@ -50,11 +50,9 @@ YANDEX_TEXT_MODEL = "yandexgpt"
 # остальные модели, у которых есть шанс, — берётся первая доступная.
 YANDEX_VISION_MODELS = (
     "gemma-3-27b-it",
+    "aliceai-vlm",
     "aliceai-llm",
     "aliceai-llm-flash",
-    "deepseek-v4-flash",
-    "qwen3.6-35b-a3b",
-    "qwen3-235b-a22b-fp8",
 )
 
 # Ограничение частоты: сколько запросов к модели можно сделать с одного адреса
@@ -287,12 +285,26 @@ def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
 
     # Этикетку прочитать не вышло — показываем саму фотографию той модели,
     # которая на это способна.
-    for model in _vision_candidates():
+    try:
+        candidates = _vision_candidates()
+    except AiUnavailable as err:
+        # Не теряем причину, по которой не сработало чтение этикетки: чинить,
+        # скорее всего, надо именно её, а не набор моделей.
+        problems.append(str(err))
+        candidates = []
+    for model in candidates:
         try:
             card = _yandex_card(model, prompt, image)
         except AiUnavailable as err:
             log.warning("модель %s не разобрала фото: %s", model, err)
             problems.append(f"{model} — {err}")
+            continue
+        if _did_not_see_the_image(card):
+            # Текстовая модель принимает запрос с картинкой, но саму картинку
+            # не видит и честно пишет «фото не приложено». Такой ответ хуже
+            # отказа: выглядит как результат. Идём к следующей модели.
+            log.warning("модель %s картинку не увидела", model)
+            problems.append(f"{model} — картинку не увидела")
             continue
         log.info("фото разобрала модель %s", model)
         # Что не сработало до этого — тоже пишем: карточка от модели, которая
@@ -302,9 +314,32 @@ def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
         if problems:
             card["via"] += ". До этого не вышло: " + "; ".join(problems)
         return card
-    raise AiUnavailable(
-        ("Фотографию не разобрала ни одна из доступных моделей. " + "; ".join(problems))[:700]
-    )
+    raise AiUnavailable(_photo_failure(problems))
+
+
+# Как выглядит ответ модели, до которой картинка не доехала.
+_BLIND_ANSWER = ("фото не", "фотография не", "изображение не", "картинк", "не прикреплен", "не предоставлен")
+
+
+def _did_not_see_the_image(card: dict) -> bool:
+    if card.get("recognized"):
+        return False
+    comment = (card.get("comment") or "").casefold()
+    return any(mark in comment for mark in _BLIND_ANSWER)
+
+
+def _photo_failure(problems: list[str]) -> str:
+    """Собрать отказ так, чтобы из него было понятно, что чинить."""
+    parts = ["Распознать фотографию не удалось."]
+    # 403 у OCR — это не поломка, а недоданное право: чинится одной ролью
+    # в консоли Yandex Cloud, поэтому говорим об этом прямо.
+    if any("403" in problem for problem in problems if problem.startswith("чтение этикетки")):
+        parts.append(
+            "Чтение этикетки (Yandex Vision OCR) отвечает «нет доступа»: "
+            "сервисному аккаунту нужна роль ai.vision.user, а ключу — право её использовать."
+        )
+    parts.append("Подробности: " + "; ".join(problems) + ".")
+    return " ".join(parts)[:700]
 
 
 def _prompt_with_label(prompt: str, label: str) -> str:
@@ -455,8 +490,10 @@ def _yandex_post(payload: dict, allow_retry: bool) -> dict | None:
             f"Не удалось связаться с Яндексом. {type(err).__name__}: {err}"[:300]
         ) from err
 
-    if allow_retry and response.status_code == 400:
-        log.warning("Яндекс не принял response_format, повторяю без схемы")
+    # 400 — «схему не приняли», 500 — так отвечают некоторые модели на тот же
+    # response_format. В обоих случаях есть смысл повторить без схемы.
+    if allow_retry and response.status_code in {400, 500}:
+        log.warning("Яндекс ответил %s на запрос со схемой, повторяю без неё", response.status_code)
         return None
     if response.status_code >= 400:
         # Текст ошибки показываем как есть: без него «403» ничего не объясняет,

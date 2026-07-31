@@ -168,6 +168,42 @@ def test_all_models_refusing_gives_one_message_with_every_reason(monkeypatch, no
     assert "aliceai-llm" in str(err.value)
 
 
+def test_a_model_that_did_not_see_the_photo_is_not_an_answer(monkeypatch, no_ocr):
+    """«Фото не прикреплено» — это слепая модель, а не результат распознавания."""
+    answers = {
+        "aliceai-llm": '{"recognized": false, "comment": "Фотография не прикреплена"}',
+        "aliceai-llm-flash": '{"recognized": true, "name": "Laphroaig 10"}',
+    }
+
+    def fake_post(payload, allow_retry):
+        model = payload["model"].split("/")[3]
+        return {"choices": [{"message": {"content": answers[model]}}]}
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", fake_post)
+    monkeypatch.setattr(ai, "_yandex_models", lambda: list(answers))
+
+    card = ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert card["name"] == "Laphroaig 10"
+    assert "картинку не увидела" in card["via"]
+
+
+def test_ocr_forbidden_names_the_role_to_grant(monkeypatch):
+    """403 у OCR чинится одной ролью в консоли — об этом и надо сказать."""
+    def refuse_ocr(image):
+        raise ai.AiUnavailable("403. Permission denied")
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_ocr", refuse_ocr)
+    monkeypatch.setattr(ai, "_yandex_models", lambda: ["yandexgpt"])
+
+    with pytest.raises(ai.AiUnavailable) as err:
+        ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert "ai.vision.user" in str(err.value)
+
+
 def test_folder_without_a_single_vision_model_says_so(monkeypatch, no_ocr):
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
