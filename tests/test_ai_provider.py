@@ -10,7 +10,7 @@ from app.config import ai_provider
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for name in ("ANTHROPIC_API_KEY", "YANDEX_API_KEY", "YANDEX_FOLDER_ID", "AI_PROVIDER"):
+    for name in ("ANTHROPIC_API_KEY", "YANDEX_API_KEY", "YANDEX_FOLDER_ID", "AI_PROVIDER", "AI_PHOTO"):
         monkeypatch.delenv(name, raising=False)
     ai.reset_models_cache()
 
@@ -52,13 +52,24 @@ def test_provider_can_be_forced(monkeypatch):
     assert ai_provider() is None
 
 
-def test_yandex_offers_photo_too(client, monkeypatch):
+def test_yandex_hides_photo_until_it_is_allowed(client, monkeypatch):
+    """У Яндекса фото упирается в права, а не в код: пока их нет, кнопки нет."""
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
-    assert ai.supports_images() is True
+    assert ai.supports_images() is False
     page = client.get("/whisky", params={"q": "нет такого"}).text
     assert "Спросить у ИИ" in page
-    assert "Сфотографируйте этикетку" in page
+    assert "Сфотографируйте этикетку" not in page
+
+    monkeypatch.setenv("AI_PHOTO", "on")
+    assert ai.supports_images() is True
+    assert "Сфотографируйте этикетку" in client.get("/whisky", params={"q": "нет такого"}).text
+
+
+def test_anthropic_takes_photos_without_a_switch(monkeypatch):
+    """Там картинку понимает сама модель — включать нечего."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ключ")
+    assert ai.supports_images() is True
 
 
 @pytest.fixture

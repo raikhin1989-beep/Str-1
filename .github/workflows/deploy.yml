@@ -111,6 +111,7 @@ jobs:
       YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
       YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
       AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+      AI_PHOTO: ${{ secrets.AI_PHOTO }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
     steps:
@@ -264,7 +265,7 @@ jobs:
           command_timeout: 10m
           # Каждый секрет нужно перечислить здесь поимённо: ssh-action передаёт
           # на сервер только то, что указано в envs, остальное молча теряется.
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER,TELEGRAM_BOT_TOKEN,TELEGRAM_WEBHOOK_SECRET
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER,AI_PHOTO,TELEGRAM_BOT_TOKEN,TELEGRAM_WEBHOOK_SECRET
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -302,6 +303,12 @@ jobs:
             if [ -n "$AI_PROVIDER" ]; then
               printf 'AI_PROVIDER=%s\n' "$AI_PROVIDER" >> /etc/str-1/app.env
               echo "AI_PROVIDER: $AI_PROVIDER (выбор провайдера задан явно)"
+            fi
+            # Загрузка фото у Яндекса выключена по умолчанию: она упирается
+            # в роль ai.vision.user, а не в код (docs/PLAN.md, шаг 4).
+            if [ -n "$AI_PHOTO" ]; then
+              printf 'AI_PHOTO=%s\n' "$AI_PHOTO" >> /etc/str-1/app.env
+              echo "AI_PHOTO: $AI_PHOTO (распознавание по фотографии задано явно)"
             fi
             if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$YANDEX_API_KEY" ]; then
               echo "::warning::ключей распознавания нет — поиск виски работает только по справочнику"
@@ -390,6 +397,12 @@ jobs:
               *) if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$YANDEX_API_KEY" ]; then
                    echo "::error::ключи распознавания заданы в секретах, но не доехали до приложения"; exit 1
                  fi ;;
+            esac
+            case "$health" in
+              *'"ai_photo":true'*) : ;;
+              *) case "$AI_PHOTO" in
+                   on|1|yes|да) echo "::error::AI_PHOTO включён в секретах, но приложение фото не предлагает"; exit 1 ;;
+                 esac ;;
             esac
 
             echo "=== конфиг отдельного экземпляра Caddy ==="

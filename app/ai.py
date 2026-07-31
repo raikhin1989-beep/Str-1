@@ -23,7 +23,7 @@ import os
 import re
 import time
 
-from app.config import ai_provider, anthropic_key, yandex_folder, yandex_key
+from app.config import ai_provider, anthropic_key, photo_lookup, yandex_folder, yandex_key
 from app.db import connect
 
 log = logging.getLogger("str1.ai")
@@ -134,8 +134,12 @@ def provider() -> str | None:
 
 
 def supports_images() -> bool:
-    """Умеет ли текущий провайдер разбирать фотографии."""
-    return ai_provider() in {"anthropic", "yandex"}
+    """Предлагать ли гостю загрузить фотографию.
+
+    Код для фото готов у обоих провайдеров; включён он там, где реально
+    работает — см. config.photo_lookup().
+    """
+    return ai_provider() is not None and photo_lookup()
 
 
 def check_rate_limit(ip: str) -> None:

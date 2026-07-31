@@ -57,3 +57,22 @@ def ai_provider() -> str | None:
     if anthropic_key():
         return "anthropic"
     return None
+
+
+def photo_lookup() -> bool:
+    """Показывать ли загрузку фотографии.
+
+    У Яндекса фото упирается не в код, а в права: чтение этикетки (Vision OCR)
+    отвечает 403, пока сервисному аккаунту не выдана роль ai.vision.user, а
+    моделей, понимающих картинку, каталогу не открыто (docs/PLAN.md, шаг 4).
+    Пока прав нет, кнопка только обманывает гостя, поэтому по умолчанию она
+    спрятана; AI_PHOTO=on включает её обратно без правки кода.
+
+    У Anthropic картинку понимает сама модель — там включено сразу.
+    """
+    switch = os.environ.get("AI_PHOTO", "").strip().lower()
+    if switch in {"on", "1", "yes", "да"}:
+        return True
+    if switch in {"off", "0", "no", "нет"}:
+        return False
+    return ai_provider() == "anthropic"
