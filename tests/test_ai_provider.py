@@ -12,6 +12,7 @@ from app.config import ai_provider
 def clean_env(monkeypatch):
     for name in ("ANTHROPIC_API_KEY", "YANDEX_API_KEY", "YANDEX_FOLDER_ID", "AI_PROVIDER"):
         monkeypatch.delenv(name, raising=False)
+    ai.reset_models_cache()
 
 
 def test_no_keys_means_no_provider():
@@ -60,8 +61,8 @@ def test_yandex_offers_photo_too(client, monkeypatch):
     assert "Сфотографируйте этикетку" in page
 
 
-def test_photo_goes_to_the_vision_model(monkeypatch):
-    """Текст и картинку обслуживают разные модели: картинки понимает только gemma."""
+def test_photo_goes_to_a_vision_model(monkeypatch):
+    """Текст и картинку обслуживают разные модели, и картиночную выбираем из открытых."""
     seen = {}
 
     def fake_post(payload, allow_retry):
@@ -72,15 +73,62 @@ def test_photo_goes_to_the_vision_model(monkeypatch):
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
     monkeypatch.setattr(ai, "_yandex_post", fake_post)
+    monkeypatch.setattr(ai, "_yandex_models", lambda: ["yandexgpt", "aliceai-llm"])
 
     ai._ask_yandex("что это?")
     assert seen["model"] == "gpt://b1gtest/yandexgpt/latest"
 
     ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
-    assert seen["model"] == "gpt://b1gtest/gemma-3-27b-it/latest"
+    # gemma каталогу не открыта, поэтому берётся следующий кандидат из списка.
+    assert seen["model"] == "gpt://b1gtest/aliceai-llm/latest"
     kinds = [part["type"] for part in seen["content"]]
     assert kinds == ["text", "image_url"]
     assert seen["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_next_model_is_tried_when_one_refuses_the_photo(monkeypatch):
+    tried = []
+
+    def fake_post(payload, allow_retry):
+        model = payload["model"].split("/")[3]
+        tried.append(model)
+        if model == "gemma-3-27b-it":
+            raise ai.AiUnavailable("Яндекс ответил 403. Forbidden")
+        return {"choices": [{"message": {"content": '{"name": "Laphroaig 10"}'}}]}
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", fake_post)
+    monkeypatch.setattr(ai, "_yandex_models", lambda: ["gemma-3-27b-it", "aliceai-llm"])
+
+    card = ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert card["name"] == "Laphroaig 10"
+    assert tried == ["gemma-3-27b-it", "aliceai-llm"]
+
+
+def test_all_models_refusing_gives_one_message_with_every_reason(monkeypatch):
+    def fake_post(payload, allow_retry):
+        raise ai.AiUnavailable("Яндекс ответил 403. Forbidden")
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", fake_post)
+    monkeypatch.setattr(ai, "_yandex_models", lambda: ["gemma-3-27b-it", "aliceai-llm"])
+
+    with pytest.raises(ai.AiUnavailable) as err:
+        ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert "gemma-3-27b-it" in str(err.value)
+    assert "aliceai-llm" in str(err.value)
+
+
+def test_folder_without_a_single_vision_model_says_so(monkeypatch):
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_models", lambda: ["yandexgpt", "text-embeddings"])
+
+    with pytest.raises(ai.AiUnavailable) as err:
+        ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert "не открыта ни одна модель" in str(err.value)
 
 
 def test_schema_refusal_falls_back_to_a_plain_request(monkeypatch):
@@ -149,17 +197,13 @@ def test_refusal_says_whether_the_model_is_open_to_the_folder(monkeypatch):
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
     monkeypatch.setattr("httpx.post", lambda *a, **kw: _Response(403, text="Forbidden"))
-    monkeypatch.setattr(
-        ai,
-        "_yandex_models",
-        lambda: ["yandexgpt", "yandexgpt-lite", "qwen3-235b-a22b-fp8"],
-    )
+    monkeypatch.setattr(ai, "_yandex_models", lambda: ["qwen3-235b-a22b-fp8", "text-embeddings"])
 
     with pytest.raises(ai.AiUnavailable) as err:
-        ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
-    assert "gemma-3-27b-it" in str(err.value)
+        ai._ask_yandex("что это?")
+    assert "yandexgpt" in str(err.value)
     assert "не открыта" in str(err.value)
-    assert "yandexgpt-lite" in str(err.value)
+    assert "qwen3-235b-a22b-fp8" in str(err.value)
 
 
 def test_model_list_keeps_only_names(monkeypatch):

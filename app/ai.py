@@ -37,10 +37,18 @@ YANDEX_URL = "https://llm.api.cloud.yandex.net/v1/chat/completions"
 # по нему сразу видно, открыта ли каталогу нужная модель вообще.
 YANDEX_MODELS_URL = "https://llm.api.cloud.yandex.net/v1/models"
 YANDEX_TEXT_MODEL = "yandexgpt"
-# Картинки на сегодня понимает только эта модель — так прямо сказано
-# в примере multimodal.py их SDK: «at this moment this is only model
-# which supports image processing».
-YANDEX_VISION_MODEL = "gemma-3-27b-it"
+# Кандидаты на разбор фотографии, в порядке предпочтения. Первым идёт
+# gemma-3-27b-it: в примере multimodal.py их SDK сказано, что картинки
+# понимает только она. Нашему каталогу её не выдали, поэтому дальше идут
+# остальные модели, у которых есть шанс, — берётся первая доступная.
+YANDEX_VISION_MODELS = (
+    "gemma-3-27b-it",
+    "aliceai-llm",
+    "aliceai-llm-flash",
+    "deepseek-v4-flash",
+    "qwen3.6-35b-a3b",
+    "qwen3-235b-a22b-fp8",
+)
 
 # Ограничение частоты: сколько запросов к модели можно сделать с одного адреса
 # за час. Счётчик в памяти процесса — приложение одно, этого достаточно.
@@ -248,14 +256,53 @@ def _ask_anthropic(prompt: str, image: tuple[bytes, str] | None) -> dict:
 def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
     """Yandex AI Studio через OpenAI-совместимый эндпоинт.
 
-    Тот же адрес и та же форма запроса, что у их официального SDK. Картинку
-    принимает только gemma-3-27b-it, поэтому модель выбирается по наличию фото.
+    Тот же адрес и та же форма запроса, что у их официального SDK. Текст
+    обслуживает yandexgpt; для фотографии модель подбирается из тех, что
+    открыты каталогу — набор моделей у каждого каталога свой.
     """
+    if image is None:
+        return _yandex_card(YANDEX_TEXT_MODEL, prompt, None)
+
+    problems = []
+    for model in _vision_candidates():
+        try:
+            card = _yandex_card(model, prompt, image)
+        except AiUnavailable as err:
+            log.warning("модель %s не разобрала фото: %s", model, err)
+            problems.append(f"{model} — {err}")
+            continue
+        log.info("фото разобрала модель %s", model)
+        return card
+    raise AiUnavailable(
+        ("Фотографию не разобрала ни одна из доступных моделей. " + "; ".join(problems))[:700]
+    )
+
+
+def _vision_candidates() -> list[str]:
+    """Модели, которым имеет смысл показать фотографию, в порядке предпочтения.
+
+    Пересекаем свой список с тем, что открыто каталогу: жёстко зашитое имя
+    ломается молча, когда каталогу его не выдали, — так уже случилось
+    с gemma-3-27b-it.
+    """
+    available = _yandex_models()
+    if not available:
+        # Список получить не удалось — пробуем всё, что знаем: отказ по каждой
+        # модели всё равно попадёт в сообщение.
+        return list(YANDEX_VISION_MODELS)
+    candidates = [name for name in YANDEX_VISION_MODELS if name in available]
+    if candidates:
+        return candidates
+    raise AiUnavailable(
+        "В каталоге Yandex Cloud не открыта ни одна модель, понимающая "
+        "изображения. Открыты: " + ", ".join(available[:20])
+    )
+
+
+def _yandex_card(model: str, prompt: str, image: tuple[bytes, str] | None) -> dict:
+    """Один заход к конкретной модели Яндекса."""
     import base64
 
-    import httpx
-
-    model = YANDEX_VISION_MODEL if image is not None else YANDEX_TEXT_MODEL
     content: list[dict] = [{"type": "text", "text": prompt}]
     if image is not None:
         image_bytes, media_type = image
@@ -379,10 +426,20 @@ def _explain_refusal(err: AiUnavailable, model: str) -> AiUnavailable:
     )
 
 
+# Список моделей меняется редко, а спрашивают его по нескольку раз за один
+# неудачный запрос — держим ответ в памяти процесса на четверть часа.
+_models_cache: tuple[float, list[str]] | None = None
+MODELS_CACHE_SECONDS = 900
+
+
 def _yandex_models() -> list[str]:
     """Короткие имена моделей, доступных каталогу. Пустой список — не удалось узнать."""
+    global _models_cache
+
     import httpx
 
+    if _models_cache is not None and time.time() - _models_cache[0] < MODELS_CACHE_SECONDS:
+        return _models_cache[1]
     try:
         response = httpx.get(
             YANDEX_MODELS_URL,
@@ -405,7 +462,15 @@ def _yandex_models() -> list[str]:
         parts = str(item.get("id", "")).split("/")
         if len(parts) >= 4:
             names.append(parts[3])
+    _models_cache = (time.time(), names)
     return names
+
+
+def reset_models_cache() -> None:
+    """Забыть список моделей — нужно тестам и после смены ключа."""
+    global _models_cache
+
+    _models_cache = None
 
 
 def _parse_card(text: str) -> dict:
