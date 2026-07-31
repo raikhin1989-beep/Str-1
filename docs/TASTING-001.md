@@ -47,6 +47,24 @@
   односолодовый из одной бочки из-под бурбона, натуральный цвет, без холодной
   фильтрации. Название с акцизной наклейки — «Солодовый виски КЕМЛЯ АМЕРИКАН ОУК».
 
+## Цены
+
+Проверено 31.07.2026 по WineStyle и Декантеру. Точное совпадение бутылки нашлось
+**только у Kemlya** — остальные четыре трэвел-ретейл, в российскую розницу они не
+попадают, и цена посчитана от ближайшего розлива того же производителя.
+
+| Бутылка | В справочнике | Откуда |
+| --- | --- | --- |
+| Kemlya American Oak | **17 490 ₽** | [WineStyle](https://winestyle.ru/products/Kemlya-American-Oak-wooden-box.html) — ровно этот розлив 0,7 л 49,5 % в деревянном ящике |
+| Dalmore The Quartet | 12 000 ₽ | В рознице только литровая версия: [15 380 ₽ Декантер](https://decanter.ru/product/dalmore-the-quartet-id254176), [19 990 ₽ WineStyle](https://winestyle.ru/products/Dalmore-The-Quartet.html). В пересчёте на 0,7 л — 11–14 тыс. |
+| Aberlour Suthainn | 13 000 ₽ | Сопоставимые хересные Aberlour 0,7 л: A'bunadh Alba 14 470 ₽, 16 Double Cask 13 570 ₽, 14 Double Cask 11 000 ₽ (Декантер) |
+| Jack Daniel's Single Barrel 100 Proof | 9 000 ₽ | Обычный Single Barrel Select 0,7 л 45 %: 6 990 ₽ (WineStyle), 8 020 ₽ (Декантер); 100 proof дороже |
+| Johnnie Walker Black Label Triple Cask | 5 500 ₽ | Обычный литровый Black Label: 4 390–7 750 ₽ (WineStyle, Декантер) |
+
+Итого на столе примерно **57 тысяч рублей** — если считать по этим ориентирам.
+Aberlour Suthainn и Jack Daniel's 100 Proof в России не купить вовсе, так что
+для них это оценка, а не ценник.
+
 ## Что это значит для правил
 
 Категория для частичных баллов — **класс** (см. `docs/SCORING.md`). При таком

@@ -49,6 +49,20 @@ def test_every_class_in_the_lineup_is_one_we_offer():
             assert row["wclass"] in models.WHISKY_CLASSES
 
 
+def test_every_bottle_has_a_price():
+    """Цена — одно из четырёх обещаний карточки, пустой она быть не должна."""
+    for row in models.list_whiskies():
+        if row["name"] in EXPECTED:
+            assert row["price_rub"], f"{row['name']}: цены нет"
+
+
+def test_the_one_bottle_sold_in_russia_has_the_shop_price():
+    """Kemlya нашлась в рознице ровно этим розливом — тут не ориентир, а цена."""
+    kemlya = next(r for r in models.list_whiskies() if r["name"] == "Kemlya American Oak")
+    assert kemlya["price_rub"] == 17490
+    assert "WineStyle" in kemlya["notes"]
+
+
 def test_seeded_cards_are_marked_as_unverified():
     for row in models.list_whiskies():
         if row["name"] in EXPECTED:
