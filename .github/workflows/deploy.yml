@@ -395,4 +395,11 @@ jobs:
             echo "str-1-site:       $(systemctl is-active str-1-site 2>/dev/null || echo нет)"
             echo "=== каталог Str-1 ==="; ls -la "$SITE_ROOT" 2>/dev/null || echo "каталога нет"
             echo "=== version ==="; cat "$SITE_ROOT/version" 2>/dev/null || echo "нет файла version"
+            # Договорённость с репозиторием Str: без этой строки наш блок лежит
+            # мёртвым грузом и HTTPS не работает, поэтому смотрим на неё прямо.
+            echo "=== import в основном Caddyfile ==="
+            grep -n 'sites\.d' /etc/caddy/Caddyfile 2>/dev/null || echo "НЕТ — HTTPS для Str-1 работать не будет"
+            echo "=== наш блок ==="; cat /etc/caddy/sites.d/str-1.caddy 2>/dev/null || echo "файла нет"
+            echo "=== сертификаты Caddy ==="
+            find /var/lib/caddy -name '*.crt' 2>/dev/null | head || echo "нет сертификатов"
             echo "=== disk ==="; df -h / | tail -1
