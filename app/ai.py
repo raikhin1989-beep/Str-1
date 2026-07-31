@@ -8,7 +8,7 @@
 Провайдеров два, выбор — в app/config.ai_provider():
 
 * **yandex** — Yandex AI Studio. Работает с сервера в России, поэтому сейчас
-  основной. Фото пока не поддерживает (см. supports_images).
+  основной. Текст обрабатывает yandexgpt, фотографии — gemma-3-27b-it.
 * **anthropic** — как задумывалось изначально. С московского сервера получает
   403 ещё на краю сети, поэтому включится только после переезда хостинга.
 
@@ -30,9 +30,14 @@ log = logging.getLogger("str1.ai")
 
 ANTHROPIC_MODEL = "claude-opus-5"
 
-# Yandex AI Studio, синхронная генерация текста.
-YANDEX_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-YANDEX_MODEL = "yandexgpt"
+# Yandex AI Studio, OpenAI-совместимый эндпоинт — тот же, которым пользуется
+# их официальный SDK (yandex-cloud/yandex-ai-studio-sdk).
+YANDEX_URL = "https://llm.api.cloud.yandex.net/v1/chat/completions"
+YANDEX_TEXT_MODEL = "yandexgpt"
+# Картинки на сегодня понимает только эта модель — так прямо сказано
+# в примере multimodal.py их SDK: «at this moment this is only model
+# which supports image processing».
+YANDEX_VISION_MODEL = "gemma-3-27b-it"
 
 # Ограничение частоты: сколько запросов к модели можно сделать с одного адреса
 # за час. Счётчик в памяти процесса — приложение одно, этого достаточно.
@@ -110,13 +115,8 @@ def provider() -> str | None:
 
 
 def supports_images() -> bool:
-    """Умеет ли текущий провайдер разбирать фотографии.
-
-    У Яндекса мультимодальные модели есть, но форму запроса с картинкой не на
-    чем проверить, пока нет ключей, а обещать гостям кнопку, которая падает, —
-    хуже, чем её не показывать. Как проверим на живом ключе, вернём.
-    """
-    return ai_provider() == "anthropic"
+    """Умеет ли текущий провайдер разбирать фотографии."""
+    return ai_provider() in {"anthropic", "yandex"}
 
 
 def check_rate_limit(ip: str) -> None:
@@ -176,7 +176,7 @@ def _ask(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
             "Распознавание выключено: на сервере не заданы ключи ни Яндекса, ни Anthropic."
         )
     if chosen == "yandex":
-        return _ask_yandex(prompt)
+        return _ask_yandex(prompt, image)
     return _ask_anthropic(prompt, image)
 
 
@@ -242,23 +242,32 @@ def _ask_anthropic(prompt: str, image: tuple[bytes, str] | None) -> dict:
     return _parse_card(text)
 
 
-def _ask_yandex(prompt: str) -> dict:
-    """Yandex AI Studio, синхронная генерация.
+def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
+    """Yandex AI Studio через OpenAI-совместимый эндпоинт.
 
-    Схему просим соблюдать текстом, а не параметром структурированного вывода:
-    формат этого параметра у Яндекса менялся, а инструкция плюс аккуратный
-    разбор работают одинаково на всех моделях семейства.
+    Тот же адрес и та же форма запроса, что у их официального SDK. Картинку
+    принимает только gemma-3-27b-it, поэтому модель выбирается по наличию фото.
     """
+    import base64
+
     import httpx
+
+    model = YANDEX_VISION_MODEL if image is not None else YANDEX_TEXT_MODEL
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    if image is not None:
+        image_bytes, media_type = image
+        encoded = base64.standard_b64encode(image_bytes).decode("ascii")
+        content.append(
+            {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{encoded}"}}
+        )
 
     fields = ", ".join(CARD_SCHEMA["required"])
     payload = {
-        "modelUri": f"gpt://{yandex_folder()}/{YANDEX_MODEL}/latest",
-        "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": "2000"},
+        "model": f"gpt://{yandex_folder()}/{model}/latest",
         "messages": [
             {
                 "role": "system",
-                "text": (
+                "content": (
                     SYSTEM
                     + "\n\nОтвечай ТОЛЬКО объектом JSON, без пояснений и без разметки. "
                     + f"Обязательные поля: {fields}. "
@@ -266,31 +275,54 @@ def _ask_yandex(prompt: str) -> dict:
                     + "неизвестное оставляй пустой строкой."
                 ),
             },
-            {"role": "user", "text": prompt},
+            {"role": "user", "content": content},
         ],
+        "max_tokens": 2000,
+        "temperature": 0.3,
     }
+    schema = {
+        "type": "json_schema",
+        "json_schema": {"name": "whisky_card", "schema": CARD_SCHEMA},
+    }
+
+    # Схему просим параметром, но не полагаемся на неё: она поддержана не всеми
+    # моделями семейства, и отказ из-за неё не должен ронять распознавание.
+    # Инструкция в системном сообщении и терпимый разбор работают и без неё.
+    body = _yandex_post({**payload, "response_format": schema}, allow_retry=True)
+    if body is None:
+        body = _yandex_post(payload, allow_retry=False)
+
+    try:
+        text = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError) as err:
+        log.error("неожиданная форма ответа Яндекса: %s", str(body)[:500])
+        raise AiUnavailable("Модель вернула ответ неожиданной формы.") from err
+    return _parse_card(text)
+
+
+def _yandex_post(payload: dict, allow_retry: bool) -> dict | None:
+    """Один запрос к Яндексу. None означает «схему не приняли, попробуй без неё»."""
+    import httpx
 
     try:
         response = httpx.post(
             YANDEX_URL,
             json=payload,
             headers={"Authorization": f"Api-Key {yandex_key()}"},
-            timeout=60.0,
+            timeout=90.0,
         )
+        if allow_retry and response.status_code == 400:
+            log.warning("Яндекс не принял response_format, повторяю без схемы")
+            return None
         response.raise_for_status()
-        body = response.json()
+        return response.json()
+    except AiUnavailable:
+        raise
     except Exception as err:
         log.exception("запрос к Яндексу не удался")
         raise AiUnavailable(
             f"Не удалось получить ответ модели. {type(err).__name__}: {err}"[:300]
         ) from err
-
-    try:
-        text = body["result"]["alternatives"][0]["message"]["text"]
-    except (KeyError, IndexError) as err:
-        log.error("неожиданная форма ответа Яндекса: %s", str(body)[:500])
-        raise AiUnavailable("Модель вернула ответ неожиданной формы.") from err
-    return _parse_card(text)
 
 
 def _parse_card(text: str) -> dict:

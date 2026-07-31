@@ -51,23 +51,54 @@ def test_provider_can_be_forced(monkeypatch):
     assert ai_provider() is None
 
 
-def test_photo_is_hidden_while_yandex_answers(client, monkeypatch):
+def test_yandex_offers_photo_too(client, monkeypatch):
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
-    assert ai.supports_images() is False
+    assert ai.supports_images() is True
     page = client.get("/whisky", params={"q": "нет такого"}).text
-    assert "Спросить у ИИ" in page, "поиск по названию Яндекс умеет"
-    assert "Сфотографируйте этикетку" not in page, "а кнопки фото быть не должно"
+    assert "Спросить у ИИ" in page
+    assert "Сфотографируйте этикетку" in page
 
 
-def test_photo_request_is_refused_politely(client, monkeypatch):
+def test_photo_goes_to_the_vision_model(monkeypatch):
+    """Текст и картинку обслуживают разные модели: картинки понимает только gemma."""
+    seen = {}
+
+    def fake_post(payload, allow_retry):
+        seen["model"] = payload["model"]
+        seen["content"] = payload["messages"][-1]["content"]
+        return {"choices": [{"message": {"content": '{"name": "Laphroaig 10"}'}}]}
+
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
-    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
-    response = client.post(
-        "/whisky/photo", files={"photo": ("p.jpg", b"\xff\xd8data", "image/jpeg")}
-    )
-    assert response.status_code == 503
-    assert "недоступно" in response.text
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", fake_post)
+
+    ai._ask_yandex("что это?")
+    assert seen["model"] == "gpt://b1gtest/yandexgpt/latest"
+
+    ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert seen["model"] == "gpt://b1gtest/gemma-3-27b-it/latest"
+    kinds = [part["type"] for part in seen["content"]]
+    assert kinds == ["text", "image_url"]
+    assert seen["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_schema_refusal_falls_back_to_a_plain_request(monkeypatch):
+    """Если модель не приняла response_format, спрашиваем без схемы, а не падаем."""
+    calls = []
+
+    def fake_post(payload, allow_retry):
+        calls.append(("response_format" in payload, allow_retry))
+        if allow_retry:
+            return None  # так _yandex_post сообщает «схему не приняли»
+        return {"choices": [{"message": {"content": '{"name": "Laphroaig 10"}'}}]}
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", fake_post)
+
+    assert ai._ask_yandex("что это?")["name"] == "Laphroaig 10"
+    assert calls == [(True, True), (False, False)]
 
 
 CARD_JSON = {
