@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A static site in `site/`, deployed over SSH to the **same server that already hosts the sibling project [`raikhin1989-beep/Str`](https://github.com/raikhin1989-beep/Str)** (a birthday invitation site live at `https://raikhin.duckdns.org/`). At present `site/` is a placeholder page — what this site is actually for has not been decided yet.
+A site in `site/`, deployed over SSH to the **same server that already hosts the sibling project [`raikhin1989-beep/Str`](https://github.com/raikhin1989-beep/Str)** (a birthday invitation site live at `https://raikhin.duckdns.org/`).
 
-There is no build system, package manifest, linter, or test suite. `site/` is hand-written content served as-is; don't assume npm/pip/make targets exist.
+**What this is becoming:** a web app for a whisky tasting competition — public whisky lookup by name or bottle photo, participant registration, two blind rounds (by nose, then by palate), leaderboard, admin panel, results delivered over Telegram. Live at `https://raikhinwhiskey.duckdns.org/`. The plan and its acceptance criteria are in [`docs/PLAN.md`](docs/PLAN.md); architecture, data model, scoring rules and operations live alongside it in `docs/`. **Read `docs/PLAN.md` before starting work** — it defines the step the repository is currently on.
+
+At present `site/` is still the placeholder page and no application code exists yet. Until step 1 of the plan lands there is no build system, package manifest, linter, or test suite, and `site/` is hand-written content served as-is; don't assume npm/pip/make targets exist. From step 1 onward the app is Python (FastAPI + SQLite) under `app/`, with pytest gating the deploy — see `docs/ARCHITECTURE.md`.
 
 ## Sharing a server with `Str` — read before touching the deploy
 
@@ -18,6 +20,8 @@ There is no build system, package manifest, linter, or test suite. `site/` is ha
 | Own web server config | `/etc/caddy/Caddyfile` | `/etc/caddy/str-1.caddyfile` |
 | Own service | `caddy.service` | `str-1-site.service` |
 | Own ports | 80, 443 | 8081 |
+
+Step 1 of the plan adds `str-1-app.service` on `127.0.0.1:8082` and a SQLite database at `/var/lib/str-1/app.db`. The database is deliberately **outside** `/var/www/str-1`: the docroot is rsynced with `--delete`, so anything there that doesn't come from `site/` is erased on the next deploy. See `docs/ARCHITECTURE.md`.
 
 The site is served two ways, on purpose:
 
