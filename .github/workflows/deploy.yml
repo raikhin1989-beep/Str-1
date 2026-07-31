@@ -45,6 +45,14 @@ concurrency:
 env:
   SITE_ROOT: /var/www/str-1
   SITE_PORT: "8081"
+  # Как сайт отдаётся наружу:
+  #   duckdns — <DUCKDNS_SUBDOMAIN>.duckdns.org по HTTPS через основной Caddy,
+  #             сертификат Let's Encrypt. Требует секретов DUCKDNS_SUBDOMAIN и
+  #             DUCKDNS_TOKEN; без них шаг честно предупреждает и остаётся HTTP.
+  #   off     — только http://<SERVER_HOST>:8081, без домена и TLS.
+  # Отдача на 8081 работает в обоих режимах: это запасной вход, не зависящий
+  # ни от DNS, ни от чужого конфига.
+  TLS_MODE: duckdns
 
 jobs:
   # ── DEPLOY: выложить содержимое site/ на сервер ─────────────────────────────
@@ -55,6 +63,8 @@ jobs:
       SERVER_ADDR: ${{ secrets.SERVER_HOST }}
       SERVER_LOGIN: ${{ secrets.SERVER_USER || 'root' }}
       SERVER_SSH_PORT: ${{ secrets.SERVER_PORT || 22 }}
+      # Контекст secrets недоступен в step-level if, поэтому раскрываем здесь.
+      HAS_DUCKDNS: ${{ secrets.DUCKDNS_SUBDOMAIN != '' && secrets.DUCKDNS_TOKEN != '' }}
     steps:
       # Проверка до первого подключения: иначе про незаданный секрет узнаёшь из
       # невнятной ошибки ssh-action, а не из явного сообщения.
@@ -70,6 +80,49 @@ jobs:
             exit 1
           fi
           echo "секреты на месте; вход: $SERVER_LOGIN@***:$SERVER_SSH_PORT"
+
+      # SITE_DOMAIN вычисляется в шелле, а не в env job'а: он собирается из
+      # секрета, а к секретам в env выражениях доступ только на подстановку.
+      - name: Resolve site domain
+        env:
+          SUB: ${{ secrets.DUCKDNS_SUBDOMAIN }}
+        run: |
+          set -e
+          domain=""
+          case "$TLS_MODE" in
+            duckdns)
+              if [ "$HAS_DUCKDNS" = "true" ]; then
+                domain="${SUB}.duckdns.org"
+              else
+                # Не ошибка: поддомен на duckdns.org заводится руками через их
+                # веб-интерфейс, API создания у них нет. Пока этого не сделали,
+                # сайт продолжает жить на порту 8081.
+                echo "::warning::нет секретов DUCKDNS_SUBDOMAIN/DUCKDNS_TOKEN — домен и HTTPS пропущены, остаётся порт $SITE_PORT"
+              fi
+              ;;
+            off) ;;
+            *) echo "::error::неизвестный TLS_MODE='$TLS_MODE'"; exit 1 ;;
+          esac
+          echo "SITE_DOMAIN=$domain" >> "$GITHUB_ENV"
+          echo "домен: ${domain:-<нет, только порт $SITE_PORT>}"
+
+      # У DuckDNS нет API для создания поддомена — только обновление IP уже
+      # существующего. Если поддомен не заведён, ответ будет KO.
+      - name: Refresh DuckDNS IP
+        if: ${{ env.SITE_DOMAIN != '' }}
+        env:
+          SUB: ${{ secrets.DUCKDNS_SUBDOMAIN }}
+          TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
+        run: |
+          set -e
+          resp=$(curl -sS --get "https://www.duckdns.org/update" \
+                   --data-urlencode "domains=$SUB" \
+                   --data-urlencode "token=$TOKEN" \
+                   --data-urlencode "ip=$SERVER_ADDR")
+          echo "duckdns: $resp"
+          # API отвечает голым OK или KO; KO — неверный токен либо поддомен,
+          # который так и не завели.
+          [ "$resp" = "OK" ] || { echo "::error::DuckDNS вернул '$resp' — проверьте, что поддомен создан на duckdns.org и токен верный"; exit 1; }
 
       - uses: actions/checkout@v4
 
@@ -134,7 +187,7 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 10m
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -195,6 +248,80 @@ jobs:
             echo "index:   OK"
             echo "healthz: $(curl -fsS http://127.0.0.1:$SITE_PORT/healthz)"
 
+            # Домен и TLS обслуживает ОСНОВНОЙ Caddy: порты 80/443 заняты им, а
+            # два процесса один порт не поделят. Сам /etc/caddy/Caddyfile мы не
+            # трогаем — деплой Str пересобирает его с нуля и затёр бы правку;
+            # вместо этого кладём свой блок в каталог, который тот файл
+            # импортирует.
+            SITES_D=/etc/caddy/sites.d
+            OUR=$SITES_D/str-1.caddy
+            if [ -n "$SITE_DOMAIN" ]; then
+              echo "=== блок для $SITE_DOMAIN в основном Caddy ==="
+              mkdir -p "$SITES_D"
+              cat > "$OUR" <<CADDY
+            $SITE_DOMAIN {
+            	encode gzip
+            	root * $SITE_ROOT
+            	file_server
+            }
+
+            http://$SITE_DOMAIN {
+            	redir https://$SITE_DOMAIN{uri} permanent
+            }
+            CADDY
+              sed -i 's/^[[:space:]]\{12\}//' "$OUR"
+
+              # Без import наш файл просто лежит мёртвым грузом, и деплой
+              # отрапортовал бы об успехе при неработающем HTTPS. Падаем явно:
+              # сайт на порту 8081 при этом продолжает работать.
+              if ! grep -q 'sites\.d' /etc/caddy/Caddyfile; then
+                rm -f "$OUR"
+                echo "::error::основной /etc/caddy/Caddyfile не импортирует $SITES_D — в репозитории Str нужен деплой с этой строкой, иначе HTTPS для Str-1 невозможен"
+                exit 1
+              fi
+
+              # Валидируем весь основной конфиг вместе с нашим блоком. Если он
+              # плох — убираем свой файл и падаем, НЕ перезагружая Caddy: чужой
+              # сайт должен остаться на прежнем рабочем конфиге.
+              if ! caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+                rm -f "$OUR"
+                echo "::error::наш блок ломает основной конфиг Caddy — файл удалён, перезагрузка не выполнялась"
+                exit 1
+              fi
+              systemctl reload caddy || systemctl restart caddy
+              echo "основной Caddy перечитал конфиг"
+            else
+              # Режим без домена: за собой прибираем, иначе в чужом конфиге
+              # останется блок на несуществующее имя.
+              if [ -e "$OUR" ]; then
+                rm -f "$OUR"
+                caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && \
+                  { systemctl reload caddy || systemctl restart caddy; }
+                echo "убрали свой блок из основного Caddy"
+              fi
+            fi
+
+            if [ -n "$SITE_DOMAIN" ]; then
+              echo "=== ждём сертификат для $SITE_DOMAIN ==="
+              # Первый выпуск Let's Encrypt занимает секунды, но при занятом
+              # DNS-кэше или лимите может тянуться; пять минут — предел.
+              cert_ok=""
+              for i in $(seq 1 20); do
+                if curl -fsS -o /dev/null --max-time 10 "https://$SITE_DOMAIN/healthz"; then
+                  cert_ok=1; echo "TLS: сертификат выпущен, HTTPS отвечает"; break
+                fi
+                sleep 15
+              done
+              if [ -z "$cert_ok" ]; then
+                echo "::error::HTTPS не поднялся за 5 минут — логи ниже"
+                journalctl -u caddy --no-pager -n 60 || true
+                exit 1
+              fi
+              echo "--- сертификат ---"
+              echo | openssl s_client -connect "$SITE_DOMAIN:443" -servername "$SITE_DOMAIN" 2>/dev/null \
+                | openssl x509 -noout -issuer -dates || true
+            fi
+
             echo "=== чужое хозяйство не задето ==="
             # Явная проверка, что деплой Str-1 не уронил основной сайт.
             systemctl is-active caddy || echo "::warning::основной caddy не активен"
@@ -223,6 +350,26 @@ jobs:
           }
           echo "healthz снаружи: $(curl -fsS --max-time 20 "$base/healthz")"
           echo "сайт доступен: $base/"
+
+          # Тот же контроль для домена: HTTPS отдаёт основной Caddy, а не наш
+          # экземпляр на 8081, поэтому совпадение SHA здесь проверяет ещё и то,
+          # что оба смотрят в один каталог.
+          if [ -n "$SITE_DOMAIN" ]; then
+            https_sha=$(curl -fsS --max-time 20 "https://$SITE_DOMAIN/version") || {
+              echo "::error::https://$SITE_DOMAIN/version недоступен снаружи"
+              exit 1
+            }
+            [ "$https_sha" = "$GITHUB_SHA" ] || {
+              echo "::error::по HTTPS отдаётся другой коммит: $https_sha вместо $GITHUB_SHA"
+              exit 1
+            }
+            echo "HTTPS version:  $https_sha"
+            echo "HTTPS healthz:  $(curl -fsS --max-time 20 "https://$SITE_DOMAIN/healthz")"
+            # Редирект с HTTP на HTTPS прописан явно — проверяем, что он живой.
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://$SITE_DOMAIN/")
+            echo "http://$SITE_DOMAIN/ -> $code (ожидается 301)"
+            echo "сайт доступен: https://$SITE_DOMAIN/"
+          fi
 
   # ── INSPECT: только осмотреть сервер, ничего не менять ──────────────────────
   inspect:
