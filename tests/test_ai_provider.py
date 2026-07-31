@@ -61,7 +61,54 @@ def test_yandex_offers_photo_too(client, monkeypatch):
     assert "Сфотографируйте этикетку" in page
 
 
-def test_photo_goes_to_a_vision_model(monkeypatch):
+@pytest.fixture
+def no_ocr(monkeypatch):
+    """Этикетка не прочиталась — значит, дело дойдёт до показа самой фотографии."""
+    monkeypatch.setattr(ai, "_yandex_ocr", lambda image: "")
+
+
+def test_label_is_read_by_ocr_first(monkeypatch):
+    """Название и крепость на этикетке написаны буквами — читать их надёжнее, чем угадывать."""
+    seen = {}
+
+    def fake_post(payload, allow_retry):
+        seen["model"] = payload["model"]
+        seen["prompt"] = payload["messages"][-1]["content"][0]["text"]
+        return {"choices": [{"message": {"content": '{"name": "Laphroaig 10"}'}}]}
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", fake_post)
+    monkeypatch.setattr(ai, "_yandex_ocr", lambda image: "LAPHROAIG 10 YEARS OLD 40%")
+
+    card = ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert card["name"] == "Laphroaig 10"
+    assert "OCR" in card["via"]
+    # Текстовой модели, а не картиночной: картинку она всё равно не увидит.
+    assert seen["model"] == "gpt://b1gtest/yandexgpt/latest"
+    assert "LAPHROAIG 10 YEARS OLD 40%" in seen["prompt"]
+
+
+def test_ocr_reads_the_full_text_of_a_page(monkeypatch):
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(
+        "httpx.post",
+        lambda *a, **kw: _Response(
+            200, {"result": {"textAnnotation": {"fullText": "LAPHROAIG\n10 YEARS"}}}
+        ),
+    )
+    assert ai._yandex_ocr((b"\xff\xd8data", "image/jpeg")) == "LAPHROAIG 10 YEARS"
+
+
+def test_ocr_skips_formats_it_cannot_take(monkeypatch):
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr("httpx.post", lambda *a, **kw: pytest.fail("WebP слать не надо"))
+    assert ai._yandex_ocr((b"RIFF", "image/webp")) == ""
+
+
+def test_photo_goes_to_a_vision_model(monkeypatch, no_ocr):
     """Текст и картинку обслуживают разные модели, и картиночную выбираем из открытых."""
     seen = {}
 
@@ -86,7 +133,7 @@ def test_photo_goes_to_a_vision_model(monkeypatch):
     assert seen["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
-def test_next_model_is_tried_when_one_refuses_the_photo(monkeypatch):
+def test_next_model_is_tried_when_one_refuses_the_photo(monkeypatch, no_ocr):
     tried = []
 
     def fake_post(payload, allow_retry):
@@ -106,7 +153,7 @@ def test_next_model_is_tried_when_one_refuses_the_photo(monkeypatch):
     assert tried == ["gemma-3-27b-it", "aliceai-llm"]
 
 
-def test_all_models_refusing_gives_one_message_with_every_reason(monkeypatch):
+def test_all_models_refusing_gives_one_message_with_every_reason(monkeypatch, no_ocr):
     def fake_post(payload, allow_retry):
         raise ai.AiUnavailable("Яндекс ответил 403. Forbidden")
 
@@ -121,7 +168,7 @@ def test_all_models_refusing_gives_one_message_with_every_reason(monkeypatch):
     assert "aliceai-llm" in str(err.value)
 
 
-def test_folder_without_a_single_vision_model_says_so(monkeypatch):
+def test_folder_without_a_single_vision_model_says_so(monkeypatch, no_ocr):
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
     monkeypatch.setattr(ai, "_yandex_models", lambda: ["yandexgpt", "text-embeddings"])

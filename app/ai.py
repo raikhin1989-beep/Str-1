@@ -36,6 +36,13 @@ YANDEX_URL = "https://llm.api.cloud.yandex.net/v1/chat/completions"
 # Список моделей, доступных каталогу. Спрашиваем только когда в доступе отказали:
 # по нему сразу видно, открыта ли каталогу нужная модель вообще.
 YANDEX_MODELS_URL = "https://llm.api.cloud.yandex.net/v1/models"
+
+# Yandex Vision OCR: читает текст с картинки. Для этикетки это надёжнее любой
+# языковой модели — название, крепость и выдержка на ней просто написаны.
+# Адрес и форма запроса взяты из их же protobuf (yandex/cloud/ai/ocr/v1).
+YANDEX_OCR_URL = "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"
+OCR_MIME = {"image/jpeg": "JPEG", "image/png": "PNG"}
+OCR_MAX_CHARS = 1500
 YANDEX_TEXT_MODEL = "yandexgpt"
 # Кандидаты на разбор фотографии, в порядке предпочтения. Первым идёт
 # gemma-3-27b-it: в примере multimodal.py их SDK сказано, что картинки
@@ -264,6 +271,22 @@ def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
         return _yandex_card(YANDEX_TEXT_MODEL, prompt, None)
 
     problems = []
+
+    # Сначала читаем этикетку OCR: название, крепость и выдержка на ней
+    # написаны буквами, и языковой модели остаётся только опознать розлив.
+    try:
+        label = _yandex_ocr(image)
+    except AiUnavailable as err:
+        label = ""
+        log.warning("OCR не сработал: %s", err)
+        problems.append(f"чтение этикетки — {err}")
+    if label:
+        card = _yandex_card(YANDEX_TEXT_MODEL, _prompt_with_label(prompt, label), None)
+        card["via"] = "текст с этикетки прочитан Yandex Vision OCR"
+        return card
+
+    # Этикетку прочитать не вышло — показываем саму фотографию той модели,
+    # которая на это способна.
     for model in _vision_candidates():
         try:
             card = _yandex_card(model, prompt, image)
@@ -272,10 +295,67 @@ def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
             problems.append(f"{model} — {err}")
             continue
         log.info("фото разобрала модель %s", model)
+        card["via"] = f"фотографию смотрела модель {model}"
         return card
     raise AiUnavailable(
         ("Фотографию не разобрала ни одна из доступных моделей. " + "; ".join(problems))[:700]
     )
+
+
+def _prompt_with_label(prompt: str, label: str) -> str:
+    return (
+        prompt
+        + "\n\nСамой фотографии у тебя нет — вот текст, распознанный на этикетке "
+        "(строки идут как на бутылке, возможны ошибки распознавания):\n"
+        f"«{label}»\n"
+        "Опознай виски по этому тексту. Если текста слишком мало или он не про "
+        "виски, ставь recognized=false и скажи в comment, что именно прочиталось."
+    )
+
+
+def _yandex_ocr(image: tuple[bytes, str]) -> str:
+    """Текст с этикетки. Пустая строка означает «прочитать нечего»."""
+    import base64
+
+    import httpx
+
+    image_bytes, media_type = image
+    mime = OCR_MIME.get(media_type)
+    if mime is None:
+        # WebP этот сервис не принимает — не ошибка, просто идём дальше.
+        return ""
+
+    try:
+        response = httpx.post(
+            YANDEX_OCR_URL,
+            json={
+                "content": base64.standard_b64encode(image_bytes).decode("ascii"),
+                "mimeType": mime,
+                "languageCodes": ["*"],
+                "model": "page",
+            },
+            headers={
+                "Authorization": f"Api-Key {yandex_key()}",
+                "x-folder-id": yandex_folder() or "",
+            },
+            timeout=60.0,
+        )
+    except Exception as err:
+        log.exception("запрос к Vision OCR не удался")
+        raise AiUnavailable(f"{type(err).__name__}: {err}"[:200]) from err
+
+    if response.status_code >= 400:
+        log.error("Vision OCR ответил %s: %s", response.status_code, response.text[:500])
+        raise AiUnavailable(f"{response.status_code}. {_yandex_error_text(response)}"[:200])
+
+    try:
+        body = response.json()
+    except ValueError as err:
+        raise AiUnavailable("ответ неожиданной формы") from err
+    # Метод потоковый, поэтому REST заворачивает страницу в result.
+    page = body.get("result", body)
+    text = (page.get("textAnnotation") or {}).get("fullText") or ""
+    return " ".join(text.split())[:OCR_MAX_CHARS]
 
 
 def _vision_candidates() -> list[str]:

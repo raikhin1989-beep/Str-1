@@ -13,6 +13,8 @@
   <p class="lead">{{ card.comment or "Не удалось определить, что это за виски." }}</p>
 {% endif %}
 
+{% if card.via %}<p class="note">Как получено: {{ card.via }}.</p>{% endif %}
+
 {% if card.recognized %}
   {% set facts = [
     ("Крепость", (card.abv ~ " %") if card.abv else None),
