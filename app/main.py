@@ -10,7 +10,9 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 
+from app import ai
 from app.admin import router as admin_router
+from app.config import admin_password
 from app.public import router as public_router
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -31,13 +33,21 @@ app.include_router(admin_router)
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    """Живо ли приложение.
+def health() -> dict:
+    """Живо ли приложение и какие функции включены.
 
     Отдельно от /healthz: тот отдаётся файлом и проверяет, что доехал деплой.
     Этот отвечает, только если работает сам процесс приложения.
+
+    Флаги показывают, доехали ли секреты до приложения, — сами значения,
+    разумеется, не отдаются. Без этого потерянный по дороге секрет выключал бы
+    функцию молча, а деплой рапортовал бы об успехе.
     """
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "admin": bool(admin_password()),
+        "ai": ai.is_configured(),
+    }
 
 
 @app.get("/")

@@ -253,7 +253,9 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 10m
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD
+          # Каждый секрет нужно перечислить здесь поимённо: ssh-action передаёт
+          # на сервер только то, что указано в envs, остальное молча теряется.
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -335,7 +337,20 @@ jobs:
               journalctl -u str-1-app --no-pager -n 60 || true
               exit 1
             fi
-            echo "app health: $(curl -fsS http://127.0.0.1:$APP_PORT/api/health)"
+            health=$(curl -fsS "http://127.0.0.1:$APP_PORT/api/health")
+            echo "app health: $health"
+
+            # Секрет мог быть задан в репозитории, но не доехать до приложения —
+            # например, если его забыли перечислить в envs у ssh-action. Раньше
+            # это выключало функцию молча и деплой рапортовал об успехе.
+            case "$health" in
+              *'"admin":true'*) : ;;
+              *) [ -z "$ADMIN_PASSWORD" ] || { echo "::error::ADMIN_PASSWORD задан в секретах, но не доехал до приложения"; exit 1; } ;;
+            esac
+            case "$health" in
+              *'"ai":true'*) : ;;
+              *) [ -z "$ANTHROPIC_API_KEY" ] || { echo "::error::ANTHROPIC_API_KEY задан в секретах, но не доехал до приложения"; exit 1; } ;;
+            esac
 
             echo "=== конфиг отдельного экземпляра Caddy ==="
             # admin off обязателен: админский endpoint по умолчанию слушает
