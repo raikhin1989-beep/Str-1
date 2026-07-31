@@ -34,12 +34,14 @@ def fake_model(monkeypatch):
     """Подменяет единственное место, где происходит обращение к API."""
     calls = []
 
-    def _ask(messages):
-        calls.append(messages)
+    def _ask(prompt, image=None):
+        calls.append((prompt, image))
         return CARD
 
     monkeypatch.setattr(ai, "_ask", _ask)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "тестовый-ключ")
+    monkeypatch.delenv("YANDEX_API_KEY", raising=False)
+    monkeypatch.delenv("AI_PROVIDER", raising=False)
     ai._requests.clear()
     return calls
 
@@ -83,13 +85,14 @@ def test_rate_limit_trips_after_the_quota(fake_model):
 
 def test_without_key_the_feature_is_off(client, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("YANDEX_API_KEY", raising=False)
     assert ai.is_configured() is False
     # Кнопки распознавания на странице поиска нет.
     assert "Спросить у ИИ" not in client.get("/whisky", params={"q": "нет такого"}).text
     # А прямой запрос отвечает понятным сообщением, а не пятисоткой.
     response = client.post("/whisky/ask", data={"q": "Aberlour"})
     assert response.status_code == 503
-    assert "ANTHROPIC_API_KEY" in response.text
+    assert "не заданы ключи" in response.text
 
 
 def test_ask_shows_card(client, fake_model):
@@ -102,7 +105,7 @@ def test_ask_shows_card(client, fake_model):
 def test_unrecognized_photo_explains_itself(client, monkeypatch, fake_model):
     monkeypatch.setattr(
         ai, "_ask",
-        lambda messages: {**CARD, "recognized": False, "comment": "На фото не видно этикетки."},
+        lambda prompt, image=None: {**CARD, "recognized": False, "comment": "На фото не видно этикетки."},
     )
     response = client.post(
         "/whisky/photo", files={"photo": ("p.jpg", b"\xff\xd8data", "image/jpeg")}

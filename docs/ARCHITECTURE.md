@@ -55,7 +55,7 @@ DuckDNS: API умеет только обновлять IP у уже сущес�
 | Шаблоны | Jinja2, серверный рендеринг |
 | Клиентский JS | Ванильный, без сборки. Живая таблица — опрос раз в 3 секунды |
 | Хранилище | SQLite, режим WAL |
-| Распознавание виски | Anthropic API, модель `claude-opus-5` (текст и фото), кэш в БД |
+| Распознавание виски | Yandex AI Studio (текст) или Anthropic `claude-opus-5` (текст и фото), кэш в БД. Выбор — по доступности с сервера, см. `docs/PLAN.md` |
 | Телеграм | Bot API, вебхук на секретном пути |
 | Тесты | pytest, прогон в CI до выката |
 
@@ -105,7 +105,10 @@ pytest.ini           корень репозитория в sys.path для те
 | `SERVER_USER`, `SERVER_PORT` | По умолчанию `root` и `22` | нет |
 | `DUCKDNS_SUBDOMAIN`, `DUCKDNS_TOKEN` | Домен и сертификат | для HTTPS |
 | `ADMIN_PASSWORD` | Вход в админку | да |
-| `ANTHROPIC_API_KEY` | Распознавание виски по названию и фото | да |
+| `ANTHROPIC_API_KEY` | Распознавание виски — только с хостинга вне РФ | нет |
+| `YANDEX_API_KEY` | Распознавание виски через Yandex AI Studio | для распознавания |
+| `YANDEX_FOLDER_ID` | Каталог Yandex Cloud, нужен вместе с ключом | для распознавания |
+| `AI_PROVIDER` | Явный выбор провайдера: `yandex`, `anthropic` или `off` | нет |
 | `TELEGRAM_BOT_TOKEN` | Бот `@raikhinwhiskey_bot` | шаг 5 |
 | `TELEGRAM_WEBHOOK_SECRET` | Секретный путь вебхука, придумывается произвольно | шаг 5 |
 

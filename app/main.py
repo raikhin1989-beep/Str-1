@@ -47,6 +47,7 @@ def health() -> dict:
         "status": "ok",
         "admin": bool(admin_password()),
         "ai": ai.is_configured(),
+        "ai_provider": ai.provider(),
     }
 
 

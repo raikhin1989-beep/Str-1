@@ -20,9 +20,18 @@ def test_health_reports_which_secrets_arrived(monkeypatch):
     """Флаги ловят потерянный по дороге секрет: без них функция выключается молча."""
     monkeypatch.setenv("ADMIN_PASSWORD", "есть")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "есть")
-    assert client.get("/api/health").json() == {"status": "ok", "admin": True, "ai": True}
+    monkeypatch.delenv("YANDEX_API_KEY", raising=False)
+    assert client.get("/api/health").json() == {
+        "status": "ok", "admin": True, "ai": True, "ai_provider": "anthropic",
+    }
+
+    # Ключи Яндекса перевешивают: запрос уходит с сервера, а он в России.
+    monkeypatch.setenv("YANDEX_API_KEY", "есть")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
+    assert client.get("/api/health").json()["ai_provider"] == "yandex"
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("YANDEX_API_KEY", raising=False)
     assert client.get("/api/health").json()["ai"] is False
 
 

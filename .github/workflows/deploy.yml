@@ -34,7 +34,9 @@ name: Deploy to server
 #   DUCKDNS_SUBDOMAIN — метка поддомена      [для домена и HTTPS]
 #   DUCKDNS_TOKEN     — токен аккаунта DuckDNS [для домена и HTTPS]
 #   ADMIN_PASSWORD    — пароль админки       [без него /admin отвечает 503]
-#   ANTHROPIC_API_KEY — ключ Anthropic API   [без него распознавание выключено]
+#   ANTHROPIC_API_KEY — ключ Anthropic API   [не работает с сервера в РФ]
+#   YANDEX_API_KEY    — ключ Yandex AI Studio [основной провайдер распознавания]
+#   YANDEX_FOLDER_ID  — каталог Yandex Cloud  [нужен вместе с ключом]
 #
 # Секреты попадают в приложение через /etc/str-1/app.env (права 600, владелец
 # str1) и в логи не пишутся: проверяется только факт наличия.
@@ -104,6 +106,8 @@ jobs:
       HAS_DUCKDNS: ${{ secrets.DUCKDNS_SUBDOMAIN != '' && secrets.DUCKDNS_TOKEN != '' }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+      YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
     steps:
       # Проверка до первого подключения: иначе про незаданный секрет узнаёшь из
       # невнятной ошибки ssh-action, а не из явного сообщения.
@@ -255,7 +259,7 @@ jobs:
           command_timeout: 10m
           # Каждый секрет нужно перечислить здесь поимённо: ssh-action передаёт
           # на сервер только то, что указано в envs, остальное молча теряется.
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -275,8 +279,16 @@ jobs:
             if [ -n "$ANTHROPIC_API_KEY" ]; then
               printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >> /etc/str-1/app.env
               echo "ANTHROPIC_API_KEY: задан (${#ANTHROPIC_API_KEY} символов)"
-            else
-              echo "::warning::ANTHROPIC_API_KEY не задан — распознавание виски будет выключено"
+            fi
+            if [ -n "$YANDEX_API_KEY" ] && [ -n "$YANDEX_FOLDER_ID" ]; then
+              printf 'YANDEX_API_KEY=%s\n'   "$YANDEX_API_KEY"   >> /etc/str-1/app.env
+              printf 'YANDEX_FOLDER_ID=%s\n' "$YANDEX_FOLDER_ID" >> /etc/str-1/app.env
+              echo "YANDEX_API_KEY: задан (${#YANDEX_API_KEY} символов), каталог задан"
+            elif [ -n "$YANDEX_API_KEY" ] || [ -n "$YANDEX_FOLDER_ID" ]; then
+              echo "::warning::у Яндекса нужны оба секрета — YANDEX_API_KEY и YANDEX_FOLDER_ID; задан только один"
+            fi
+            if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$YANDEX_API_KEY" ]; then
+              echo "::warning::ключей распознавания нет — поиск виски работает только по справочнику"
             fi
             umask 022
             chown root:str1 /etc/str-1/app.env
@@ -349,7 +361,9 @@ jobs:
             esac
             case "$health" in
               *'"ai":true'*) : ;;
-              *) [ -z "$ANTHROPIC_API_KEY" ] || { echo "::error::ANTHROPIC_API_KEY задан в секретах, но не доехал до приложения"; exit 1; } ;;
+              *) if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$YANDEX_API_KEY" ]; then
+                   echo "::error::ключи распознавания заданы в секретах, но не доехали до приложения"; exit 1
+                 fi ;;
             esac
 
             echo "=== конфиг отдельного экземпляра Caddy ==="

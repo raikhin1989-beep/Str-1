@@ -5,6 +5,13 @@
 запрещают, у WHISKY:EDITION открытая лицензия, но всего ~500 записей.
 Подробности и проверка — в docs/PLAN.md.
 
+Провайдеров два, выбор — в app/config.ai_provider():
+
+* **yandex** — Yandex AI Studio. Работает с сервера в России, поэтому сейчас
+  основной. Фото пока не поддерживает (см. supports_images).
+* **anthropic** — как задумывалось изначально. С московского сервера получает
+  403 ещё на краю сети, поэтому включится только после переезда хостинга.
+
 Ответы кэшируются в таблице ai_cache: повторный запрос того же виски не идёт
 в API и ничего не стоит.
 """
@@ -15,11 +22,16 @@ import logging
 import os
 import time
 
+from app.config import ai_provider, anthropic_key, yandex_folder, yandex_key
 from app.db import connect
 
 log = logging.getLogger("str1.ai")
 
-MODEL = "claude-opus-5"
+ANTHROPIC_MODEL = "claude-opus-5"
+
+# Yandex AI Studio, синхронная генерация текста.
+YANDEX_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+YANDEX_MODEL = "yandexgpt"
 
 # Ограничение частоты: сколько запросов к модели можно сделать с одного адреса
 # за час. Счётчик в памяти процесса — приложение одно, этого достаточно.
@@ -89,7 +101,21 @@ class RateLimited(Exception):
 
 
 def is_configured() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return ai_provider() is not None
+
+
+def provider() -> str | None:
+    return ai_provider()
+
+
+def supports_images() -> bool:
+    """Умеет ли текущий провайдер разбирать фотографии.
+
+    У Яндекса мультимодальные модели есть, но форму запроса с картинкой не на
+    чем проверить, пока нет ключей, а обещать гостям кнопку, которая падает, —
+    хуже, чем её не показывать. Как проверим на живом ключе, вернём.
+    """
+    return ai_provider() == "anthropic"
 
 
 def check_rate_limit(ip: str) -> None:
@@ -109,16 +135,9 @@ def lookup_by_name(query: str) -> dict:
         return cached
 
     card = _ask(
-        [
-            {
-                "role": "user",
-                "content": (
-                    f"Что это за виски: «{query}»? Заполни карточку.\n"
-                    "Если под это название подходит несколько розливов, возьми самый "
-                    "распространённый и скажи об этом в comment."
-                ),
-            }
-        ]
+        f"Что это за виски: «{query}»? Заполни карточку.\n"
+        "Если под это название подходит несколько розливов, возьми самый "
+        "распространённый и скажи об этом в comment."
     )
     _to_cache(key, "text", card)
     return card
@@ -126,6 +145,8 @@ def lookup_by_name(query: str) -> dict:
 
 def lookup_by_photo(image_bytes: bytes, media_type: str) -> dict:
     """Карточка по фотографии бутылки. Кэш — по хешу самого изображения."""
+    if not supports_images():
+        raise AiUnavailable("Распознавание по фотографии сейчас недоступно.")
     if media_type not in ALLOWED_IMAGE_TYPES:
         raise AiUnavailable("Такой формат изображения не поддерживается: нужен JPEG, PNG или WebP.")
     if len(image_bytes) > MAX_IMAGE_BYTES:
@@ -136,54 +157,58 @@ def lookup_by_photo(image_bytes: bytes, media_type: str) -> dict:
     if cached is not None:
         return cached
 
-    import base64
-
     card = _ask(
-        [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": base64.standard_b64encode(image_bytes).decode("ascii"),
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Что за виски на фотографии? Заполни карточку.\n"
-                            "Если бутылки не видно или этикетка нечитаема, поставь "
-                            "recognized=false и напиши в comment, что именно видно."
-                        ),
-                    },
-                ],
-            }
-        ]
+        "Что за виски на фотографии? Заполни карточку.\n"
+        "Если бутылки не видно или этикетка нечитаема, поставь recognized=false "
+        "и напиши в comment, что именно видно.",
+        image=(image_bytes, media_type),
     )
     _to_cache(key, "image", card)
     return card
 
 
-def _ask(messages: list[dict]) -> dict:
+def _ask(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
     """Единственное место, где происходит обращение к API. Тесты подменяют его."""
-    if not is_configured():
-        raise AiUnavailable("Распознавание выключено: на сервере не задан ANTHROPIC_API_KEY.")
+    chosen = ai_provider()
+    if chosen is None:
+        raise AiUnavailable(
+            "Распознавание выключено: на сервере не заданы ключи ни Яндекса, ни Anthropic."
+        )
+    if chosen == "yandex":
+        return _ask_yandex(prompt)
+    return _ask_anthropic(prompt, image)
 
+
+def _ask_anthropic(prompt: str, image: tuple[bytes, str] | None) -> dict:
     try:
         import anthropic
     except ImportError as err:  # pragma: no cover — на сервере пакет стоит всегда
         raise AiUnavailable("Библиотека anthropic не установлена.") from err
 
-    client = anthropic.Anthropic(timeout=60.0, max_retries=1)
+    content: list[dict] = []
+    if image is not None:
+        import base64
+
+        image_bytes, media_type = image
+        content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64.standard_b64encode(image_bytes).decode("ascii"),
+                },
+            }
+        )
+    content.append({"type": "text", "text": prompt})
+
+    client = anthropic.Anthropic(api_key=anthropic_key(), timeout=60.0, max_retries=1)
     try:
         response = client.messages.create(
-            model=MODEL,
+            model=ANTHROPIC_MODEL,
             max_tokens=8000,
             system=SYSTEM,
-            messages=messages,
+            messages=[{"role": "user", "content": content}],
             # Строгая схема: ответ гарантированно разбирается, а не «почти JSON».
             output_config={
                 "format": {"type": "json_schema", "schema": CARD_SCHEMA},
@@ -213,10 +238,82 @@ def _ask(messages: list[dict]) -> dict:
         raise AiUnavailable("Модель отказалась отвечать на этот запрос.")
 
     text = next((block.text for block in response.content if block.type == "text"), "")
+    return _parse_card(text)
+
+
+def _ask_yandex(prompt: str) -> dict:
+    """Yandex AI Studio, синхронная генерация.
+
+    Схему просим соблюдать текстом, а не параметром структурированного вывода:
+    формат этого параметра у Яндекса менялся, а инструкция плюс аккуратный
+    разбор работают одинаково на всех моделях семейства.
+    """
+    import httpx
+
+    fields = ", ".join(CARD_SCHEMA["required"])
+    payload = {
+        "modelUri": f"gpt://{yandex_folder()}/{YANDEX_MODEL}/latest",
+        "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": "2000"},
+        "messages": [
+            {
+                "role": "system",
+                "text": (
+                    SYSTEM
+                    + "\n\nОтвечай ТОЛЬКО объектом JSON, без пояснений и без разметки. "
+                    + f"Обязательные поля: {fields}. "
+                    + "Поле recognized — true или false, остальные — строки; "
+                    + "неизвестное оставляй пустой строкой."
+                ),
+            },
+            {"role": "user", "text": prompt},
+        ],
+    }
+
     try:
-        return json.loads(text)
+        response = httpx.post(
+            YANDEX_URL,
+            json=payload,
+            headers={"Authorization": f"Api-Key {yandex_key()}"},
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except Exception as err:
+        log.exception("запрос к Яндексу не удался")
+        raise AiUnavailable(
+            f"Не удалось получить ответ модели. {type(err).__name__}: {err}"[:300]
+        ) from err
+
+    try:
+        text = body["result"]["alternatives"][0]["message"]["text"]
+    except (KeyError, IndexError) as err:
+        log.error("неожиданная форма ответа Яндекса: %s", str(body)[:500])
+        raise AiUnavailable("Модель вернула ответ неожиданной формы.") from err
+    return _parse_card(text)
+
+
+def _parse_card(text: str) -> dict:
+    """Разобрать ответ модели.
+
+    Терпим к обёрткам: модель может завернуть JSON в ```-блок или добавить
+    строку до него. Берём от первой { до последней } — на карточке это
+    надёжнее, чем требовать идеально чистый ответ.
+    """
+    chunk = text.strip()
+    start, end = chunk.find("{"), chunk.rfind("}")
+    if start != -1 and end > start:
+        chunk = chunk[start : end + 1]
+    try:
+        card = json.loads(chunk)
     except json.JSONDecodeError as err:
+        log.error("неразборчивый ответ модели: %s", text[:500])
         raise AiUnavailable("Модель вернула неразборчивый ответ.") from err
+
+    # Приводим к ожидаемому виду: не все модели держат схему дословно.
+    card.setdefault("recognized", bool(card.get("name")))
+    for field in CARD_SCHEMA["required"]:
+        card.setdefault(field, "")
+    return card
 
 
 # ── кэш ────────────────────────────────────────────────────────────────────

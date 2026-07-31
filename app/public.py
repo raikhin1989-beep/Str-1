@@ -28,6 +28,7 @@ def whisky_search(request: Request, q: str = ""):
             "found": found,
             "searched": bool(q.strip()),
             "ai_available": ai.is_configured(),
+            "photo_available": ai.supports_images(),
         },
     )
 

@@ -24,3 +24,36 @@ def admin_password() -> str:
 
 def session_ttl_days() -> int:
     return int(os.environ.get("STR1_SESSION_TTL_DAYS", "14"))
+
+
+def anthropic_key() -> str:
+    return os.environ.get("ANTHROPIC_API_KEY", "")
+
+
+def yandex_key() -> str:
+    return os.environ.get("YANDEX_API_KEY", "")
+
+
+def yandex_folder() -> str:
+    return os.environ.get("YANDEX_FOLDER_ID", "")
+
+
+def ai_provider() -> str | None:
+    """Кто отвечает за распознавание виски.
+
+    Выбор — по тому, до чего может дотянуться СЕРВЕР, а не по стране гостя:
+    запрос к модели уходит с сервера, и для Anthropic важно, где стоит он.
+    Наш сервер в Москве, откуда Anthropic API не обслуживается, поэтому при
+    наличии ключей Яндекса он и выбирается. Переменная AI_PROVIDER позволяет
+    задать провайдера явно — например, после переезда на другой хостинг.
+    """
+    forced = os.environ.get("AI_PROVIDER", "").strip().lower()
+    if forced in {"yandex", "anthropic"}:
+        return forced
+    if forced == "off":
+        return None
+    if yandex_key() and yandex_folder():
+        return "yandex"
+    if anthropic_key():
+        return "anthropic"
+    return None
