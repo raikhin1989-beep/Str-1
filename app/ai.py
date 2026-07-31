@@ -295,7 +295,12 @@ def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
             problems.append(f"{model} — {err}")
             continue
         log.info("фото разобрала модель %s", model)
+        # Что не сработало до этого — тоже пишем: карточка от модели, которая
+        # фотографию не увидела, выглядит как обычный отказ, и без этой строки
+        # непонятно, чинить чтение этикетки или ответ модели.
         card["via"] = f"фотографию смотрела модель {model}"
+        if problems:
+            card["via"] += ". До этого не вышло: " + "; ".join(problems)
         return card
     raise AiUnavailable(
         ("Фотографию не разобрала ни одна из доступных моделей. " + "; ".join(problems))[:700]
