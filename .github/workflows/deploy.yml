@@ -364,6 +364,16 @@ jobs:
               *'"admin":true'*) : ;;
               *) [ -z "$ADMIN_PASSWORD" ] || { echo "::error::ADMIN_PASSWORD задан в секретах, но не доехал до приложения"; exit 1; } ;;
             esac
+            # Мало знать, что распознавание включено: с сервера в России
+            # Anthropic не работает, поэтому при наличии ключей Яндекса
+            # отвечать должен именно он.
+            case "$health" in
+              *'"ai_provider":"yandex"'*) : ;;
+              *) if [ -n "$YANDEX_API_KEY" ] && [ -n "$YANDEX_FOLDER_ID" ] \
+                    && [ "$AI_PROVIDER" != "anthropic" ] && [ "$AI_PROVIDER" != "off" ]; then
+                   echo "::error::ключи Яндекса заданы, но приложение отвечает другим провайдером"; exit 1
+                 fi ;;
+            esac
             case "$health" in
               *'"ai":true'*) : ;;
               *) if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$YANDEX_API_KEY" ]; then
