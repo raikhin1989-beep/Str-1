@@ -1,7 +1,14 @@
 name: Deploy to server
 
-# Деплой статического сайта из каталога site/ на тот же сервер, где уже живёт
-# проект Str (https://raikhin.duckdns.org/).
+# Деплой сайта дегустации на тот же сервер, где уже живёт проект Str
+# (https://raikhin.duckdns.org/).
+#
+# Что куда едет:
+#   site/  → /var/www/str-1   статика: healthz, version, /static, запасная страница
+#   app/   → /opt/str-1/app   приложение FastAPI, служба str-1-app на 127.0.0.1:8082
+# Caddy отдаёт статику файлами, остальное проксирует в приложение. /healthz и
+# /version остаются файлами намеренно: по ним проверяется, что доехал деплой,
+# и падение приложения не должно выглядеть как провалившийся выкат.
 #
 # ВАЖНО, ПОЧЕМУ ЗДЕСЬ ОТДЕЛЬНЫЙ CADDY НА ПОРТУ 8081, А НЕ ОСНОВНОЙ НА 80/443:
 # деплой репозитория Str перезаписывает /etc/caddy/Caddyfile целиком и
@@ -10,25 +17,33 @@ name: Deploy to server
 # деплое Str. Поэтому здесь всё своё и ничего общего:
 #   каталог сайта      /var/www/str-1        (Str пользуется /var/www/html)
 #   конфиг веб-сервера /etc/caddy/str-1.caddyfile  (Str — /etc/caddy/Caddyfile)
-#   служба             str-1-site.service    (Str — caddy.service)
-#   порт               8081                  (Str — 80 и 443)
+#   службы             str-1-site.service, str-1-app.service   (Str — caddy.service)
+#   порты              8081 и 8082           (Str — 80 и 443)
+#   данные             /var/lib/str-1        (вне докрута: его чистит --delete)
 # Основной Caddy, сайт Str и его бэкенд этим workflow не затрагиваются.
 #
-# Это временная схема для проверки доступа. Чтобы отдавать Str-1 по нормальному
-# имени и HTTPS, нужен второй домен и общий Caddyfile — это правка сразу двух
-# репозиториев, она делается отдельным шагом.
+# Порт 8081 — запасной вход: он не зависит ни от DNS, ни от чужого конфига и
+# остаётся рабочим, даже когда домен или основной Caddy сломаны. Домен по HTTPS
+# обслуживает основной Caddy через свой import каталога sites.d.
 #
 # Секреты репозитория (Settings → Secrets and variables → Actions):
-#   SERVER_HOST     — IP/домен сервера       [обязательно]
-#   SERVER_PASSWORD — пароль SSH             [обязательно]
-#   SERVER_USER     — пользователь SSH       [опционально, по умолчанию root]
-#   SERVER_PORT     — порт SSH               [опционально, по умолчанию 22]
+#   SERVER_HOST       — IP/домен сервера     [обязательно]
+#   SERVER_PASSWORD   — пароль SSH           [обязательно]
+#   SERVER_USER       — пользователь SSH     [опционально, по умолчанию root]
+#   SERVER_PORT       — порт SSH             [опционально, по умолчанию 22]
+#   DUCKDNS_SUBDOMAIN — метка поддомена      [для домена и HTTPS]
+#   DUCKDNS_TOKEN     — токен аккаунта DuckDNS [для домена и HTTPS]
 
 on:
   push:
     branches: [main]
     paths:
       - 'site/**'
+      - 'app/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - 'requirements-dev.txt'
+      - 'pytest.ini'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
@@ -44,6 +59,8 @@ concurrency:
 
 env:
   SITE_ROOT: /var/www/str-1
+  APP_ROOT: /opt/str-1
+  APP_PORT: "8082"
   SITE_PORT: "8081"
   # Как сайт отдаётся наружу:
   #   duckdns — <DUCKDNS_SUBDOMAIN>.duckdns.org по HTTPS через основной Caddy,
@@ -55,9 +72,24 @@ env:
   TLS_MODE: duckdns
 
 jobs:
-  # ── DEPLOY: выложить содержимое site/ на сервер ─────────────────────────────
+  # ── TESTS: ворота перед выкатом ────────────────────────────────────────────
+  # Красные тесты означают, что деплоя не будет: job deploy зависит от этого.
+  tests:
+    if: ${{ github.event_name == 'push' || inputs.action == 'deploy' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -q -r requirements-dev.txt
+      - run: pytest -q
+
+  # ── DEPLOY: выложить сайт и приложение на сервер ────────────────────────────
   deploy:
     if: ${{ github.event_name == 'push' || inputs.action == 'deploy' }}
+    needs: tests
     runs-on: ubuntu-latest
     env:
       SERVER_ADDR: ${{ secrets.SERVER_HOST }}
@@ -136,7 +168,7 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 10m
-          envs: SITE_ROOT,SITE_PORT
+          envs: SITE_ROOT,SITE_PORT,APP_ROOT
           script: |
             set -e
             export DEBIAN_FRONTEND=noninteractive
@@ -159,6 +191,21 @@ jobs:
             echo "=== каталог сайта ==="
             mkdir -p "$SITE_ROOT"
 
+            echo "=== python для приложения ==="
+            if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import venv' 2>/dev/null; then
+              apt-get update -qq
+              apt-get install -y -qq python3 python3-venv
+            fi
+            python3 --version
+
+            # Отдельный системный пользователь: приложение не должно ходить
+            # от root, а база на шаге 2 будет принадлежать именно ему.
+            id str1 >/dev/null 2>&1 || useradd --system --home-dir "$APP_ROOT" --shell /usr/sbin/nologin str1
+            mkdir -p "$APP_ROOT" /var/lib/str-1 /var/backups/str-1
+            # Каталог данных вне докрута: /var/www/str-1 синхронизируется
+            # с --delete и всё лишнее там стирается следующим выкатом.
+            chown str1:str1 /var/lib/str-1
+
             echo "=== порт $SITE_PORT в ufw, если он включён ==="
             if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
               ufw allow "${SITE_PORT}/tcp" >/dev/null 2>&1 || true
@@ -166,7 +213,7 @@ jobs:
 
       # rsync, а не envs ssh-action: через окружение проходят только маленькие
       # текстовые полезные нагрузки, на бинарных ассетах это молча ломается.
-      - name: Upload site
+      - name: Upload site and app
         env:
           SSHPASS: ${{ secrets.SERVER_PASSWORD }}
         run: |
@@ -175,9 +222,20 @@ jobs:
           sudo apt-get install -y -qq sshpass
           # sshpass -e читает пароль из окружения, чтобы он не был виден
           # в списке процессов раннера.
-          sshpass -e rsync -az --delete --stats \
-            -e "ssh -p $SERVER_SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+          SSH="ssh -p $SERVER_SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+          sshpass -e rsync -az --delete --stats -e "$SSH" \
             site/ "$SERVER_LOGIN@$SERVER_ADDR:$SITE_ROOT/"
+
+          # --delete и здесь: удалённый в репозитории модуль должен исчезнуть
+          # и на сервере. Каталог venv лежит рядом, в $APP_ROOT, а не внутри
+          # app/, поэтому под удаление не попадает.
+          sshpass -e rsync -az --delete --stats -e "$SSH" \
+            --exclude='__pycache__/' --exclude='*.pyc' \
+            app/ "$SERVER_LOGIN@$SERVER_ADDR:$APP_ROOT/app/"
+
+          sshpass -e rsync -az --stats -e "$SSH" \
+            requirements.txt "$SERVER_LOGIN@$SERVER_ADDR:$APP_ROOT/requirements.txt"
 
       - name: Configure web server and verify
         uses: appleboy/ssh-action@v1.2.0
@@ -187,10 +245,63 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 10m
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
+
+            # Приложение поднимаем ДО того, как Caddy начнёт на него проксировать:
+            # иначе между переключением конфига и стартом службы посетитель
+            # получал бы 502.
+            echo "=== зависимости приложения ==="
+            [ -x "$APP_ROOT/venv/bin/python" ] || python3 -m venv "$APP_ROOT/venv"
+            "$APP_ROOT/venv/bin/pip" install -q --upgrade pip
+            "$APP_ROOT/venv/bin/pip" install -q -r "$APP_ROOT/requirements.txt"
+            chmod -R a+rX "$APP_ROOT"
+
+            echo "=== служба приложения ==="
+            cat > /etc/systemd/system/str-1-app.service <<UNIT
+            [Unit]
+            Description=Str-1 whisky tasting app
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=str1
+            Group=str1
+            WorkingDirectory=$APP_ROOT
+            Environment=PYTHONUNBUFFERED=1
+            ExecStart=$APP_ROOT/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port $APP_PORT
+            Restart=always
+            RestartSec=3
+            NoNewPrivileges=yes
+            PrivateTmp=yes
+            ProtectSystem=full
+            ProtectHome=yes
+            ReadWritePaths=/var/lib/str-1
+
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            # Отступы нужны YAML-блоку выше, systemd их не понимает — срезаем.
+            sed -i 's/^[[:space:]]*//' /etc/systemd/system/str-1-app.service
+
+            systemctl daemon-reload
+            systemctl enable str-1-app >/dev/null 2>&1 || true
+            systemctl restart str-1-app
+
+            echo "=== ждём приложение на 127.0.0.1:$APP_PORT ==="
+            app_ok=""
+            for i in $(seq 1 15); do
+              if curl -fsS -o /dev/null "http://127.0.0.1:$APP_PORT/api/health"; then app_ok=1; break; fi
+              sleep 2
+            done
+            if [ -z "$app_ok" ]; then
+              echo "::error::приложение не поднялось — логи ниже"
+              journalctl -u str-1-app --no-pager -n 60 || true
+              exit 1
+            fi
+            echo "app health: $(curl -fsS http://127.0.0.1:$APP_PORT/api/health)"
 
             echo "=== конфиг отдельного экземпляра Caddy ==="
             # admin off обязателен: админский endpoint по умолчанию слушает
@@ -204,7 +315,25 @@ jobs:
             :$SITE_PORT {
             	encode gzip
             	root * $SITE_ROOT
-            	file_server
+
+            	# healthz и version отдаются файлами намеренно: по ним проверяется,
+            	# что доехал деплой. Если бы их отдавало приложение, его падение
+            	# выглядело бы как провалившийся выкат.
+            	@static path /healthz /version /robots.txt /favicon.ico /static/*
+            	handle @static {
+            		file_server
+            	}
+
+            	handle {
+            		reverse_proxy 127.0.0.1:$APP_PORT
+            	}
+
+            	# Приложение недоступно — показываем запасную страницу из site/,
+            	# а не голую ошибку Caddy.
+            	handle_errors 502 503 504 {
+            		rewrite * /index.html
+            		file_server
+            	}
             }
             CADDY
             caddy fmt --overwrite /etc/caddy/str-1.caddyfile || true
@@ -247,6 +376,9 @@ jobs:
             fi
             echo "index:   OK"
             echo "healthz: $(curl -fsS http://127.0.0.1:$SITE_PORT/healthz)"
+            # Проверяем не только что Caddy жив, но и что проксирование настроено:
+            # этот путь обслуживает уже приложение, а не файлы.
+            echo "api:     $(curl -fsS http://127.0.0.1:$SITE_PORT/api/health)"
 
             # Домен и TLS обслуживает ОСНОВНОЙ Caddy: порты 80/443 заняты им, а
             # два процесса один порт не поделят. Сам /etc/caddy/Caddyfile мы не
@@ -262,7 +394,20 @@ jobs:
             $SITE_DOMAIN {
             	encode gzip
             	root * $SITE_ROOT
-            	file_server
+
+            	@static path /healthz /version /robots.txt /favicon.ico /static/*
+            	handle @static {
+            		file_server
+            	}
+
+            	handle {
+            		reverse_proxy 127.0.0.1:$APP_PORT
+            	}
+
+            	handle_errors 502 503 504 {
+            		rewrite * /index.html
+            		file_server
+            	}
             }
 
             http://$SITE_DOMAIN {
@@ -349,6 +494,7 @@ jobs:
             exit 1
           }
           echo "healthz снаружи: $(curl -fsS --max-time 20 "$base/healthz")"
+          echo "api снаружи:     $(curl -fsS --max-time 20 "$base/api/health")"
           echo "сайт доступен: $base/"
 
           # Тот же контроль для домена: HTTPS отдаёт основной Caddy, а не наш
@@ -365,6 +511,7 @@ jobs:
             }
             echo "HTTPS version:  $https_sha"
             echo "HTTPS healthz:  $(curl -fsS --max-time 20 "https://$SITE_DOMAIN/healthz")"
+            echo "HTTPS api:      $(curl -fsS --max-time 20 "https://$SITE_DOMAIN/api/health")"
             # Редирект с HTTP на HTTPS прописан явно — проверяем, что он живой.
             code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://$SITE_DOMAIN/")
             echo "http://$SITE_DOMAIN/ -> $code (ожидается 301)"
@@ -384,15 +531,21 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 5m
-          envs: SITE_ROOT,SITE_PORT
+          envs: SITE_ROOT,SITE_PORT,APP_ROOT,APP_PORT
           script: |
             echo "=== OS ==="; head -2 /etc/os-release 2>&1 || true
             echo "=== whoami ==="; whoami
-            echo "=== слушают порты ==="; (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -E ":80 |:443 |:$SITE_PORT " || echo "ничего не слушает"
+            echo "=== слушают порты ==="; (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -E ":80 |:443 |:$SITE_PORT |:$APP_PORT " || echo "ничего не слушает"
             echo "=== службы ==="
             echo "caddy (Str):      $(systemctl is-active caddy 2>/dev/null || echo нет)"
             echo "str-api (Str):    $(systemctl is-active str-api 2>/dev/null || echo нет)"
             echo "str-1-site:       $(systemctl is-active str-1-site 2>/dev/null || echo нет)"
+            echo "str-1-app:        $(systemctl is-active str-1-app 2>/dev/null || echo нет)"
+            echo "=== приложение ==="
+            curl -fsS --max-time 5 "http://127.0.0.1:$APP_PORT/api/health" || echo "не отвечает"
+            echo
+            journalctl -u str-1-app --no-pager -n 15 2>/dev/null || true
+            echo "=== база ==="; ls -la /var/lib/str-1 2>/dev/null || echo "каталога нет"
             echo "=== каталог Str-1 ==="; ls -la "$SITE_ROOT" 2>/dev/null || echo "каталога нет"
             echo "=== version ==="; cat "$SITE_ROOT/version" 2>/dev/null || echo "нет файла version"
             # Договорённость с репозиторием Str: без этой строки наш блок лежит

@@ -1,28 +1,24 @@
 <!doctype html>
 <html lang="ru">
+<!--
+  Запасная страница. Обычно / отдаёт приложение через reverse_proxy; этот файл
+  Caddy показывает, когда приложение не отвечает (handle_errors), и он же
+  остаётся на / , если проксирование убрать — это описанный в плане откат.
+-->
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Str-1</title>
+<title>Дегустация виски — сайт недоступен</title>
 <meta name="robots" content="noindex">
-<style>
-  html { color-scheme: light dark; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: grid;
-    place-items: center;
-    font: 16px/1.5 system-ui, sans-serif;
-    text-align: center;
-  }
-  h1 { margin: 0 0 .5rem; font-size: 1.5rem; }
-  p { margin: 0; opacity: .65; }
-</style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <main>
-    <h1>Str-1</h1>
-    <p>Заглушка. Содержимое появится позже.</p>
+  <main class="page">
+    <h1 class="title">Секунду</h1>
+    <p class="lead">Сайт дегустации сейчас недоступен — скорее всего, идёт обновление.</p>
+    <section class="card">
+      <p>Обновите страницу через минуту. Если не помогло, напишите организатору.</p>
+    </section>
   </main>
 </body>
 </html>

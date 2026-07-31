@@ -34,10 +34,11 @@ DuckDNS: API умеет только обновлять IP у уже сущес�
 Оба экземпляра Caddy — свой на 8081 и основной на 443 — получают одинаковую логику:
 
 ```
-/healthz        → файл из /var/www/str-1   (контракт проверки деплоя)
-/version        → файл из /var/www/str-1   (контракт проверки деплоя)
-/static/*       → файлы из /var/www/str-1  (css, js, шрифты, иконки)
-/*              → reverse_proxy 127.0.0.1:8082
+/healthz, /version          → файлы из /var/www/str-1 (контракт проверки деплоя)
+/static/*, /robots.txt,
+/favicon.ico                → файлы из /var/www/str-1
+/*                          → reverse_proxy 127.0.0.1:8082
+502, 503, 504               → /index.html из /var/www/str-1 (запасная страница)
 ```
 
 `healthz` и `version` остаются статикой сознательно: по ним проверяется, что деплой
@@ -64,19 +65,29 @@ DuckDNS: API умеет только обновлять IP у уже сущес�
 ## Раскладка репозитория
 
 ```
-app/
-  main.py          точки входа и маршруты
-  models.py        схема БД и доступ к данным
-  scoring.py       подсчёт очков — чистые функции, покрыты тестами
-  ai.py            запросы к Anthropic API и кэш
-  telegram.py      бот: привязка участников и рассылка
-  templates/       Jinja2
-  static/          css, js, шрифты (уезжает в докрут)
-site/              healthz, robots.txt, иконка
-docs/              документация
-tests/             pytest
-.github/workflows/ деплой
+app/                 → /opt/str-1/app
+  main.py            точки входа и маршруты
+  models.py          схема БД и доступ к данным          (шаг 2)
+  scoring.py         подсчёт очков — чистые функции      (шаг 8)
+  ai.py              запросы к Anthropic API и кэш       (шаг 4)
+  telegram.py        бот: привязка участников и рассылка (шаг 5)
+  templates/         Jinja2
+site/                → /var/www/str-1
+  healthz            контракт проверки деплоя
+  index.html         запасная страница на случай, когда приложение молчит
+  static/            css, js, шрифты — их отдаёт Caddy файлами, не приложение
+  robots.txt
+docs/                документация
+tests/               pytest
+requirements.txt     зависимости приложения (ставятся на сервере)
+requirements-dev.txt зависимости тестов (только CI)
+pytest.ini           корень репозитория в sys.path для тестов
+.github/workflows/   деплой
 ```
+
+Стили и скрипты лежат в `site/static/`, а не в `app/`: их отдаёт Caddy прямо
+из докрута, минуя приложение, и отдельный шаг копирования не нужен — они
+приезжают тем же rsync, что и остальная статика.
 
 ## Секреты
 

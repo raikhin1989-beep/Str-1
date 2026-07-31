@@ -1,0 +1,73 @@
+/* Базовая тема: тёмный фон, тёплый янтарный акцент.
+   Полноценное оформление — шаг 10 плана, здесь только основа, чтобы страницы
+   не выглядели черновиком. */
+
+:root {
+  --bg: #12100e;
+  --bg-card: #1b1815;
+  --line: #2e2823;
+  --text: #ece5da;
+  --muted: #9c9086;
+  --amber: #d29c4e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(120% 80% at 50% 0%, #1d1813 0%, var(--bg) 60%);
+  color: var(--text);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.page {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 4rem;
+}
+
+.title {
+  margin: 0 0 .5rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 7vw, 3rem);
+  font-weight: 400;
+  letter-spacing: .01em;
+  color: var(--amber);
+}
+
+.lead {
+  margin: 0 0 2.5rem;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.card {
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: .75rem;
+  background: var(--bg-card);
+}
+
+.card h2 {
+  margin: 0 0 .75rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.15rem;
+  font-weight: 400;
+}
+
+.list {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.list li { margin: .35rem 0; }
+
+.note {
+  margin: 2rem 0 0;
+  color: var(--muted);
+  font-size: .95rem;
+}
+
+a { color: var(--amber); }
