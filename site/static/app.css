@@ -1,25 +1,42 @@
-/* Базовая тема: тёмный фон, тёплый янтарный акцент.
-   Полноценное оформление — шаг 10 плана, здесь только основа, чтобы страницы
-   не выглядели черновиком. */
+/* Тема дегустации: тёмная, тёплая, читаемая в полумраке.
+   Одна на все страницы — и публичные, и админку.
+
+   Про яркость: чистый белый на чистом чёрном в баре слепит и «звенит».
+   Поэтому фон не #000, а тёплый уголь, а текст не #fff, а тёплый костяной:
+   контраст остаётся высоким, но экран телефона не бьёт по глазам. */
 
 :root {
-  --bg: #12100e;
-  --bg-card: #1b1815;
-  --line: #2e2823;
-  --text: #ece5da;
-  --muted: #9c9086;
-  --amber: #d29c4e;
+  --bg: #100e0c;
+  --bg-deep: #1b1512;
+  --bg-card: #191614;
+  --bg-input: #0d0b0a;
+  --line: #2e2822;
+  --line-soft: #241f1b;
+  --text: #ece3d6;
+  --muted: #9d9186;
+  --amber: #d7a154;
+  --amber-dim: #a8763a;
+  --amber-glow: rgba(215, 161, 84, .14);
+  --bad: #c2705c;
+  --radius: .8rem;
+  --serif: Georgia, "Times New Roman", serif;
 }
 
 * { box-sizing: border-box; }
 
+html { scroll-behavior: smooth; }
+
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(120% 80% at 50% 0%, #1d1813 0%, var(--bg) 60%);
+  background:
+    radial-gradient(140% 90% at 50% -10%, var(--bg-deep) 0%, var(--bg) 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
-  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 17px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
 }
 
 .page {
@@ -28,49 +45,67 @@ body {
   padding: 3rem 1.25rem 4rem;
 }
 
+/* ── типографика ─────────────────────────────────────────────────────────── */
+
 .title {
-  margin: 0 0 .5rem;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2rem, 7vw, 3rem);
+  margin: 0 0 .6rem;
+  font-family: var(--serif);
+  font-size: clamp(2rem, 7vw, 3.1rem);
   font-weight: 400;
-  letter-spacing: .01em;
+  line-height: 1.1;
+  letter-spacing: .005em;
   color: var(--amber);
 }
 
 .lead {
   margin: 0 0 2.5rem;
+  max-width: 34rem;
   color: var(--muted);
   font-size: 1.05rem;
 }
 
+.note {
+  margin: 1.5rem 0 0;
+  color: var(--muted);
+  font-size: .93rem;
+}
+
+.hint { color: var(--muted); font-size: .85em; }
+
+a {
+  color: var(--amber);
+  text-underline-offset: .18em;
+  text-decoration-color: var(--amber-dim);
+  transition: color .15s ease;
+}
+
+a:hover { color: #e9bd7c; }
+
+/* ── карточки ────────────────────────────────────────────────────────────── */
+
 .card {
+  margin-bottom: 1.25rem;
   padding: 1.5rem;
   border: 1px solid var(--line);
-  border-radius: .75rem;
-  background: var(--bg-card);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--bg-card) 0%, #16130f 100%);
+  /* Едва заметная светлая кромка сверху: карточка «ловит» свет и перестаёт
+     выглядеть плоским прямоугольником. */
+  box-shadow: inset 0 1px 0 rgba(255, 240, 220, .04);
 }
 
 .card h2 {
-  margin: 0 0 .75rem;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.15rem;
+  margin: 0 0 .8rem;
+  font-family: var(--serif);
+  font-size: 1.2rem;
   font-weight: 400;
+  color: var(--text);
 }
 
-.list {
-  margin: 0;
-  padding-left: 1.15rem;
-}
+.card p:last-child { margin-bottom: 0; }
 
+.list { margin: 0; padding-left: 1.15rem; }
 .list li { margin: .35rem 0; }
-
-.note {
-  margin: 2rem 0 0;
-  color: var(--muted);
-  font-size: .95rem;
-}
-
-a { color: var(--amber); }
 
 /* ── публичные страницы ──────────────────────────────────────────────────── */
 
@@ -78,21 +113,22 @@ a { color: var(--amber); }
 
 .cardlink {
   display: block;
+  padding: .95rem 1.1rem;
   color: var(--text);
   text-decoration: none;
-  padding: .9rem 1.1rem;
+  transition: border-color .15s ease, transform .15s ease;
 }
 
-.cardlink:hover { border-color: var(--amber); }
-.cardlink strong { display: block; font-weight: 600; }
+.cardlink:hover { border-color: var(--amber-dim); transform: translateY(-1px); }
+.cardlink strong { display: block; font-weight: 600; color: var(--text); }
 .cardlink .meta { color: var(--muted); font-size: .9rem; }
 
-.facts { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem; margin: 0; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: .4rem 1.2rem; margin: 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 
 @media (max-width: 26rem) {
-  .facts { grid-template-columns: 1fr; gap: 0 0; }
+  .facts { grid-template-columns: 1fr; gap: 0; }
   .facts dd { margin-bottom: .6rem; }
 }
 
@@ -103,6 +139,91 @@ img.qr {
   border-radius: .5rem;
   background: #fff;   /* QR читается только на светлом фоне */
 }
+
+/* ── формы ───────────────────────────────────────────────────────────────── */
+
+.form { display: grid; gap: .35rem; margin-bottom: 1.5rem; }
+.form h2 { margin-bottom: .5rem; }
+.form label { margin-top: .6rem; color: var(--muted); font-size: .9rem; }
+
+.form.row { grid-template-columns: 1fr auto; align-items: end; gap: .5rem; }
+
+input, select, textarea {
+  width: 100%;
+  padding: .65rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: .45rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;   /* меньше 16px — iOS зумит страницу при фокусе */
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--amber-dim);
+  outline: 2px solid var(--amber-dim);
+  outline-offset: 1px;
+}
+
+button {
+  /* Палец, а не курсор: почти всё происходит с телефона. */
+  min-height: 2.75rem;
+  margin-top: 1rem;
+  padding: .7rem 1.2rem;
+  border: 1px solid var(--amber-dim);
+  border-radius: .45rem;
+  background: transparent;
+  color: var(--amber);
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+button:hover { background: var(--amber-glow); border-color: var(--amber); }
+
+.form.row button { margin-top: 0; }
+
+.inline { display: inline-block; margin: 0 .5rem .5rem 0; }
+
+button.link {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--amber);
+  text-decoration: underline;
+  font-size: inherit;
+}
+
+button.link:hover { background: transparent; }
+
+/* ── таблицы ─────────────────────────────────────────────────────────────── */
+
+.grid { width: 100%; margin: 1rem 0; border-collapse: collapse; font-size: .95rem; }
+
+.grid th, .grid td {
+  padding: .55rem .6rem;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.grid th { color: var(--muted); font-weight: 400; }
+.grid tr:last-child td { border-bottom: 0; }
+.grid td.num { color: var(--amber); font-variant-numeric: tabular-nums; }
+
+/* ── сообщения ───────────────────────────────────────────────────────────── */
+
+.msg {
+  margin: 0 0 1.25rem;
+  padding: .75rem .95rem;
+  border-radius: .45rem;
+  font-size: .95rem;
+}
+
+.msg-ok  { border: 1px solid #3c5a3a; background: #141d10; }
+.msg-bad { border: 1px solid #6b3a34; background: #241110; }
 
 /* ── админка ─────────────────────────────────────────────────────────────── */
 
@@ -119,121 +240,53 @@ img.qr {
 
 .adminnav .inline { margin-left: auto; }
 
-.form { display: grid; gap: .35rem; margin-bottom: 1.5rem; }
-.form h2 { margin-bottom: .5rem; }
-.form label { color: var(--muted); font-size: .9rem; margin-top: .5rem; }
-
-.form.row {
-  grid-template-columns: 1fr auto;
-  align-items: end;
-  gap: .5rem;
-}
-
-input, select, textarea {
-  width: 100%;
-  padding: .6rem .7rem;
-  border: 1px solid var(--line);
-  border-radius: .4rem;
-  background: #100e0c;
-  color: var(--text);
-  font: inherit;
-  font-size: 1rem;   /* меньше 16px — iOS зумит страницу при фокусе */
-}
-
-input:focus, select:focus, textarea:focus {
-  outline: 2px solid var(--amber);
-  outline-offset: 1px;
-}
-
-button {
-  margin-top: 1rem;
-  padding: .6rem 1.1rem;
-  border: 1px solid var(--amber);
-  border-radius: .4rem;
-  background: transparent;
-  color: var(--amber);
-  font: inherit;
-  cursor: pointer;
-}
-
-button:hover { background: rgba(210, 156, 78, .12); }
-
-.form.row button { margin-top: 0; }
-
-.inline { display: inline-block; margin: 0 .5rem .5rem 0; }
-
-button.link {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  color: var(--amber);
-  text-decoration: underline;
-  font-size: inherit;
-}
-
-.grid {
-  width: 100%;
-  margin: 1rem 0;
-  border-collapse: collapse;
-  font-size: .95rem;
-}
-
-.grid th, .grid td {
-  padding: .5rem .6rem;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-  vertical-align: top;
-}
-
-.grid th { color: var(--muted); font-weight: 400; }
-.grid td.num { color: var(--amber); font-variant-numeric: tabular-nums; }
-
-.msg {
-  margin: 0 0 1.25rem;
-  padding: .7rem .9rem;
-  border-radius: .4rem;
-  font-size: .95rem;
-}
-
-.msg-ok  { border: 1px solid #3c5a3a; background: #16200f; }
-.msg-bad { border: 1px solid #6b3a34; background: #241110; }
-
-/* Таблицы на телефоне шире экрана — пусть прокручиваются сами,
-   а не растягивают страницу. */
-@media (max-width: 34rem) {
-  .card { padding: 1rem; }
-  .grid { display: block; overflow-x: auto; white-space: nowrap; }
-}
-
 /* ── раунд ───────────────────────────────────────────────────────────────── */
 
 .sample {
   margin: 0 0 1.25rem;
-  padding: .9rem 1rem 1.1rem;
+  padding: .9rem 1rem 1.2rem;
   border: 1px solid var(--line);
   border-radius: .6rem;
+  background: rgba(0, 0, 0, .12);
 }
 
 .sample legend {
-  padding: 0 .4rem;
+  padding: 0 .45rem;
   color: var(--amber);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.05rem;
+  font-family: var(--serif);
+  font-size: 1.1rem;
 }
 
-.sample label { display: block; margin-top: .7rem; color: var(--muted); font-size: .9rem; }
-.sample .hint { font-size: .85em; }
+.sample label { display: block; margin-top: .75rem; color: var(--muted); font-size: .9rem; }
 .sample output { color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* Повтор названия: подсвечиваем оба поля, а не только последнее — иначе
    непонятно, с чем именно конфликт. */
-select.dup { border-color: #a4543f; outline: 2px solid #a4543f; outline-offset: 1px; }
+select.dup { border-color: var(--bad); outline: 2px solid var(--bad); outline-offset: 1px; }
 
-input[type="range"] { padding: 0; accent-color: var(--amber); }
+input[type="range"] { padding: 0; border: 0; background: transparent; accent-color: var(--amber); }
 
 /* ── экран ведущего ──────────────────────────────────────────────────────── */
 
 /* Таблицу читают с другого конца комнаты — здесь всё крупнее обычного. */
 .board .title { font-size: clamp(2.2rem, 6vw, 4rem); }
+.board .lead { margin-bottom: 1.5rem; font-size: clamp(1rem, 2.2vw, 1.5rem); }
 .board-table { font-size: clamp(1rem, 2.4vw, 1.6rem); }
-.board-table td.num { font-size: 1.1em; }
+.board-table td.num { font-size: 1.05em; }
+.board-table td, .board-table th { padding: .7rem .6rem; }
+
+/* ── мелочи ──────────────────────────────────────────────────────────────── */
+
+/* Таблицы на телефоне шире экрана — пусть прокручиваются сами,
+   а не растягивают страницу. */
+@media (max-width: 34rem) {
+  .page { padding: 2rem 1rem 3rem; }
+  .card { padding: 1.1rem; }
+  .grid { display: block; overflow-x: auto; white-space: nowrap; }
+}
+
+/* Кому-то анимации мешают — уважаем системную настройку. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}

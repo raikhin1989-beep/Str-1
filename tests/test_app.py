@@ -65,3 +65,17 @@ def test_openapi_is_not_published():
 
 def test_unknown_page_gives_404():
     assert client.get("/no-such-page").status_code == 404
+
+
+def test_pages_carry_a_link_preview(client):
+    """Ссылку кидают в телеграм — превью не должно быть голым."""
+    page = client.get("/whisky").text
+    assert 'property="og:title"' in page
+    assert "static/preview.png" in page
+    assert 'rel="icon"' in page
+    assert 'name="theme-color"' in page
+
+
+def test_description_is_page_specific(client):
+    assert "покажем цвет, нос" in client.get("/whisky").text
+    assert "два круга" in client.get("/").text

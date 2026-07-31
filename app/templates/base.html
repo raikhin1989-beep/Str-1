@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Дегустация виски{% endblock %}</title>
 <meta name="robots" content="noindex">
+<meta name="description" content="{% block description %}Конкурс вслепую: два круга — сначала по запаху, потом по вкусу.{% endblock %}">
+{# Цвет адресной строки браузера на телефоне: без него она остаётся светлой
+   и портит впечатление от тёмной страницы. #}
+<meta name="theme-color" content="#100e0c">
+
+{# Превью ссылки в телеграме. Заголовок и описание — отсюда, картинка нужна
+   как фон настроения: текст на неё не рисуем, телеграм покажет его рядом. #}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Дегустация виски">
+<meta property="og:title" content="{{ self.title() }}">
+<meta property="og:description" content="{{ self.description() }}">
+<meta property="og:image" content="{{ request.base_url }}static/preview.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>

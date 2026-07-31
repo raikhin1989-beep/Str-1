@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Бокал виски">
+  <!-- Иконка вкладки: бокал с драмом. Векторная, поэтому одинаково чёткая
+       и в 16 пикселей на вкладке, и на плитке домашнего экрана. -->
+  <rect width="64" height="64" rx="14" fill="#100e0c"/>
+  <!-- сам напиток -->
+  <path d="M20 30h24v14a8 8 0 0 1-8 8h-8a8 8 0 0 1-8-8z" fill="#d7a154"/>
+  <!-- стекло выше уровня -->
+  <path d="M20 14h24v30a8 8 0 0 1-8 8h-8a8 8 0 0 1-8-8z"
+        fill="none" stroke="#e8d5b5" stroke-width="3" stroke-linejoin="round"/>
+  <!-- блик -->
+  <path d="M25 20v22" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".35"/>
+</svg>
