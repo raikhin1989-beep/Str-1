@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Регистрация — {{ tasting.title }}{% endblock %}
+
+{% block content %}
+<h1 class="title">{{ tasting.title }}</h1>
+<p class="lead">Конкурс вслепую: два круга — сначала по запаху, потом по вкусу.</p>
+
+{% if error %}<p class="msg msg-bad">{{ error }}</p>{% endif %}
+
+{% if open %}
+<form method="post" action="/join/{{ tasting.public_code }}" class="card form">
+  <h2>Записаться</h2>
+  <label for="name">Как вас записать</label>
+  <input id="name" name="name" required maxlength="60" autocomplete="name"
+         placeholder="Имя, которое увидят за столом" autofocus>
+  <button type="submit">Участвую</button>
+</form>
+<p class="note">После этого будет один шаг: привязать телеграм, чтобы прислать вам итоги.</p>
+{% else %}
+<section class="card">
+  <p>Регистрация сейчас закрыта — дегустация в состоянии «{{ status_title }}».</p>
+  <p class="note">Если вы уже записывались, откройте свою личную ссылку.</p>
+</section>
+{% endif %}
+{% endblock %}

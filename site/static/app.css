@@ -96,6 +96,14 @@ a { color: var(--amber); }
   .facts dd { margin-bottom: .6rem; }
 }
 
+img.qr {
+  display: block;
+  margin: 1rem 0;
+  padding: .6rem;
+  border-radius: .5rem;
+  background: #fff;   /* QR читается только на светлом фоне */
+}
+
 /* ── админка ─────────────────────────────────────────────────────────────── */
 
 .adminnav {

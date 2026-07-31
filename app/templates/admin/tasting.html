@@ -78,6 +78,36 @@
   </form>
 </section>
 
+<section class="card">
+  <h2>Гости: {{ participants|length }}</h2>
+  {% if tasting.public_code %}
+  <p class="note">Ссылка для гостей — покажите QR со своего экрана или пришлите адрес:</p>
+  <p><a href="{{ join_url }}">{{ join_url }}</a></p>
+  <img class="qr" src="/qr.svg?data={{ join_url | urlencode }}" alt="QR-код регистрации" width="200" height="200">
+  {% if tasting.status != 'registration' %}
+    <p class="note">Сейчас по ней записаться нельзя: регистрация открыта только
+      в состоянии «регистрация».</p>
+  {% endif %}
+  {% endif %}
+
+  {% if participants %}
+  <table class="grid">
+    <thead><tr><th>Имя</th><th>Телеграм</th></tr></thead>
+    <tbody>
+      {% for p in participants %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td>{% if p.tg_chat_id %}привязан{% if p.tg_username %} (@{{ p.tg_username }}){% endif %}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">Кому итоги в телеграм не придут: {{ participants | rejectattr('tg_chat_id') | list | length }}.</p>
+  {% else %}
+  <p class="note">Пока никто не записался.</p>
+  {% endif %}
+</section>
+
 {% if next_statuses %}
 <section class="card">
   <h2>Ход дегустации</h2>

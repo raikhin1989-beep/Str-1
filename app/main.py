@@ -10,9 +10,10 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 
-from app import ai
+from app import ai, telegram
 from app.admin import router as admin_router
 from app.config import admin_password
+from app.join import router as join_router
 from app.public import router as public_router
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,6 +30,7 @@ app = FastAPI(
 
 
 app.include_router(public_router)
+app.include_router(join_router)
 app.include_router(admin_router)
 
 
@@ -48,6 +50,7 @@ def health() -> dict:
         "admin": bool(admin_password()),
         "ai": ai.is_configured(),
         "ai_provider": ai.provider(),
+        "telegram": telegram.is_configured(),
     }
 
 

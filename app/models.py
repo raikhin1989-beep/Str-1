@@ -1,6 +1,7 @@
 """Работа с данными: дегустации, справочник виски, состав дегустации."""
 
 import random
+import secrets
 import sqlite3
 
 from app.db import connect
@@ -67,10 +68,23 @@ def create_tasting(title: str, held_on: str | None, category_level: str) -> int:
         raise ValueError("неизвестная гранулярность категорий")
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO tasting (title, held_on, category_level) VALUES (?, ?, ?)",
-            (title.strip(), (held_on or "").strip() or None, category_level),
+            "INSERT INTO tasting (title, held_on, category_level, public_code)"
+            " VALUES (?, ?, ?, ?)",
+            (
+                title.strip(),
+                (held_on or "").strip() or None,
+                category_level,
+                secrets.token_urlsafe(9),
+            ),
         )
         return int(cur.lastrowid)
+
+
+def get_tasting_by_code(code: str) -> sqlite3.Row | None:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM tasting WHERE public_code = ?", (code,)
+        ).fetchone()
 
 
 def update_tasting(tasting_id: int, title: str, held_on: str | None, category_level: str) -> None:
@@ -251,6 +265,68 @@ def _renumber(conn: sqlite3.Connection, tasting_id: int) -> None:
     conn.execute(
         "UPDATE tasting_whisky SET sample_no = -sample_no WHERE tasting_id = ?", (tasting_id,)
     )
+
+
+# ── участники ──────────────────────────────────────────────────────────────
+
+
+def list_participants(tasting_id: int) -> list[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM participant WHERE tasting_id = ? ORDER BY id",
+            (tasting_id,),
+        ).fetchall()
+
+
+def get_participant_by_token(token: str) -> sqlite3.Row | None:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM participant WHERE join_token = ?", (token,)
+        ).fetchone()
+
+
+def register_participant(tasting_id: int, name: str) -> str:
+    """Записать гостя и вернуть его личный токен.
+
+    Токен — и адрес личной страницы, и полезная нагрузка deep link'а телеграма,
+    по которой бот понимает, кого привязывает.
+    """
+    clean = " ".join(name.split())
+    if not clean:
+        raise ValueError("нужно имя")
+    if len(clean) > 60:
+        raise ValueError("имя слишком длинное")
+
+    tasting = get_tasting(tasting_id)
+    if tasting is None:
+        raise ValueError("дегустация не найдена")
+    if tasting["status"] != "registration":
+        raise ValueError("регистрация на эту дегустацию сейчас закрыта")
+
+    token = secrets.token_urlsafe(16)
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO participant (tasting_id, name, join_token) VALUES (?, ?, ?)",
+            (tasting_id, clean, token),
+        )
+    return token
+
+
+def link_telegram(token: str, chat_id: int, username: str | None) -> sqlite3.Row | None:
+    """Привязать телеграм-аккаунт к участнику по токену из deep link'а."""
+    with connect() as conn:
+        participant = conn.execute(
+            "SELECT * FROM participant WHERE join_token = ?", (token,)
+        ).fetchone()
+        if participant is None:
+            return None
+        conn.execute(
+            "UPDATE participant SET tg_chat_id = ?, tg_username = ? WHERE id = ?",
+            (chat_id, username, participant["id"]),
+        )
+        return conn.execute(
+            "SELECT * FROM participant WHERE id = ?", (participant["id"],)
+        ).fetchone()
 
 
 def _require_editable(tasting_id: int) -> None:

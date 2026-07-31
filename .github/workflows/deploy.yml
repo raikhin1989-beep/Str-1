@@ -37,6 +37,8 @@ name: Deploy to server
 #   ANTHROPIC_API_KEY — ключ Anthropic API   [не работает с сервера в РФ]
 #   YANDEX_API_KEY    — ключ Yandex AI Studio [основной провайдер распознавания]
 #   YANDEX_FOLDER_ID  — каталог Yandex Cloud  [нужен вместе с ключом]
+#   TELEGRAM_BOT_TOKEN      — токен у @BotFather   [для привязки и рассылки]
+#   TELEGRAM_WEBHOOK_SECRET — случайная строка     [A-Za-z0-9_- , до 256 символов]
 #
 # Секреты попадают в приложение через /etc/str-1/app.env (права 600, владелец
 # str1) и в логи не пишутся: проверяется только факт наличия.
@@ -109,6 +111,8 @@ jobs:
       YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
       YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
       AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
     steps:
       # Проверка до первого подключения: иначе про незаданный секрет узнаёшь из
       # невнятной ошибки ssh-action, а не из явного сообщения.
@@ -260,7 +264,7 @@ jobs:
           command_timeout: 10m
           # Каждый секрет нужно перечислить здесь поимённо: ssh-action передаёт
           # на сервер только то, что указано в envs, остальное молча теряется.
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER,TELEGRAM_BOT_TOKEN,TELEGRAM_WEBHOOK_SECRET
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -287,6 +291,13 @@ jobs:
               echo "YANDEX_API_KEY: задан (${#YANDEX_API_KEY} символов), каталог задан"
             elif [ -n "$YANDEX_API_KEY" ] || [ -n "$YANDEX_FOLDER_ID" ]; then
               echo "::warning::у Яндекса нужны оба секрета — YANDEX_API_KEY и YANDEX_FOLDER_ID; задан только один"
+            fi
+            if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_WEBHOOK_SECRET" ]; then
+              printf 'TELEGRAM_BOT_TOKEN=%s\n'      "$TELEGRAM_BOT_TOKEN"      >> /etc/str-1/app.env
+              printf 'TELEGRAM_WEBHOOK_SECRET=%s\n' "$TELEGRAM_WEBHOOK_SECRET" >> /etc/str-1/app.env
+              echo "TELEGRAM_BOT_TOKEN: задан (${#TELEGRAM_BOT_TOKEN} символов), секрет вебхука задан"
+            elif [ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$TELEGRAM_WEBHOOK_SECRET" ]; then
+              echo "::warning::для бота нужны оба секрета — TELEGRAM_BOT_TOKEN и TELEGRAM_WEBHOOK_SECRET; задан только один"
             fi
             if [ -n "$AI_PROVIDER" ]; then
               printf 'AI_PROVIDER=%s\n' "$AI_PROVIDER" >> /etc/str-1/app.env
@@ -598,6 +609,27 @@ jobs:
             code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://$SITE_DOMAIN/")
             echo "http://$SITE_DOMAIN/ -> $code (ожидается 301)"
             echo "сайт доступен: https://$SITE_DOMAIN/"
+
+            # Вебхук прописываем отсюда, а не из приложения: адрес знает только
+            # деплой, и переустанавливать его на каждом старте службы незачем.
+            if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_WEBHOOK_SECRET" ]; then
+              # Телеграм принимает в секрете только эти символы; кириллица
+              # в HTTP-заголовок не поместится, и вебхук молча не заработает.
+              case "$TELEGRAM_WEBHOOK_SECRET" in
+                *[!A-Za-z0-9_-]*)
+                  echo "::error::TELEGRAM_WEBHOOK_SECRET содержит недопустимые символы — телеграм принимает только латиницу, цифры, _ и -"
+                  exit 1 ;;
+              esac
+              hook="https://$SITE_DOMAIN/tg/$TELEGRAM_WEBHOOK_SECRET"
+              resp=$(curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+                       -H 'Content-Type: application/json' \
+                       -d "{\"url\": \"$hook\", \"secret_token\": \"$TELEGRAM_WEBHOOK_SECRET\", \"allowed_updates\": [\"message\"], \"drop_pending_updates\": true}")
+              # В ответе может быть сам адрес с секретом — печатаем только вердикт.
+              case "$resp" in
+                *'"ok":true'*) echo "вебхук бота прописан" ;;
+                *) echo "::error::телеграм не принял вебхук"; exit 1 ;;
+              esac
+            fi
           fi
 
   # ── INSPECT: только осмотреть сервер, ничего не менять ──────────────────────

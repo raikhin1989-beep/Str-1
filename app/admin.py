@@ -134,11 +134,16 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
         raise HTTPException(status_code=404, detail="Дегустация не найдена")
     in_tasting = models.tasting_whiskies(tasting_id)
     chosen = {row["id"] for row in in_tasting}
+    # Ссылку собираем из адреса запроса: домен приложение из конфига не знает,
+    # а показать гостям надо ровно тот, по которому админ сейчас сидит.
+    join_url = str(request.base_url).rstrip("/") + f"/join/{tasting['public_code']}"
     return templates.TemplateResponse(
         request,
         "admin/tasting.html",
         {
             "tasting": tasting,
+            "participants": models.list_participants(tasting_id),
+            "join_url": join_url,
             "samples": in_tasting,
             "catalogue": [w for w in models.list_whiskies() if w["id"] not in chosen],
             "statuses": models.STATUS_TITLES,

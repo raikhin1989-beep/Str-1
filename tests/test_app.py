@@ -21,9 +21,10 @@ def test_health_reports_which_secrets_arrived(monkeypatch):
     monkeypatch.setenv("ADMIN_PASSWORD", "есть")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "есть")
     monkeypatch.delenv("YANDEX_API_KEY", raising=False)
-    assert client.get("/api/health").json() == {
-        "status": "ok", "admin": True, "ai": True, "ai_provider": "anthropic",
-    }
+    health = client.get("/api/health").json()
+    assert health["admin"] is True
+    assert health["ai"] is True
+    assert health["ai_provider"] == "anthropic"
 
     # Ключи Яндекса перевешивают: запрос уходит с сервера, а он в России.
     monkeypatch.setenv("YANDEX_API_KEY", "есть")

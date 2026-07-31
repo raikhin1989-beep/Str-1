@@ -74,7 +74,8 @@ app/                 → /opt/str-1/app
   admin.py           страницы админки
   scoring.py         подсчёт очков — чистые функции      (шаг 8)
   ai.py              запросы к Anthropic API и кэш       (шаг 4)
-  telegram.py        бот: привязка участников и рассылка (шаг 5)
+  telegram.py        бот: привязка участников и рассылка
+  join.py            регистрация гостей, личная страница, вебхук, QR
   migrations/        нумерованные .sql, применяются по порядку
   templates/         Jinja2, админка — в templates/admin/
 site/                → /var/www/str-1
@@ -109,8 +110,8 @@ pytest.ini           корень репозитория в sys.path для те
 | `YANDEX_API_KEY` | Распознавание виски через Yandex AI Studio | для распознавания |
 | `YANDEX_FOLDER_ID` | Каталог Yandex Cloud, нужен вместе с ключом | для распознавания |
 | `AI_PROVIDER` | Явный выбор провайдера: `yandex`, `anthropic` или `off` | нет |
-| `TELEGRAM_BOT_TOKEN` | Бот `@raikhinwhiskey_bot` | шаг 5 |
-| `TELEGRAM_WEBHOOK_SECRET` | Секретный путь вебхука, придумывается произвольно | шаг 5 |
+| `TELEGRAM_BOT_TOKEN` | Бот `@raikhinwhiskey_bot` | для привязки и рассылки |
+| `TELEGRAM_WEBHOOK_SECRET` | Секрет вебхука: латиница, цифры, `_` и `-`, до 256 символов | для привязки и рассылки |
 
 Отсутствие необязательного секрета не должно ронять деплой: функция выключается,
 в лог пишется предупреждение, остальной сайт работает. Так уже сделано для DuckDNS
