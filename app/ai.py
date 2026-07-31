@@ -198,6 +198,15 @@ def _ask(messages: list[dict]) -> dict:
         # Anthropic не попадает.
         log.exception("запрос к модели не удался")
         reason = f"{type(err).__name__}: {err}"
+        # 403 «Request not allowed» приходит с края сети, до проверки ключа:
+        # так Anthropic отвечает на запросы из регионов, где API не работает.
+        # Наш сервер в Москве, поэтому распознавание отсюда невозможно —
+        # см. docs/PLAN.md, шаг 4. Неверный ключ выглядел бы иначе: 401.
+        if "403" in reason and "not allowed" in reason.lower():
+            raise AiUnavailable(
+                "Распознавание недоступно: сервер находится в регионе, откуда "
+                "Anthropic API не обслуживается. Ключ здесь ни при чём."
+            ) from err
         raise AiUnavailable(f"Не удалось получить ответ модели. {reason[:300]}") from err
 
     if response.stop_reason == "refusal":
