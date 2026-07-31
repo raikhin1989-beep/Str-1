@@ -694,6 +694,29 @@ def whisky_of_the_night(tasting_id: int) -> dict | None:
     }
 
 
+# ── отметки о доставке ─────────────────────────────────────────────────────
+
+
+def delivered(tasting_id: int, kind: str) -> set[int]:
+    """Кому это сообщение уже уходило."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT d.participant_id FROM delivery d"
+            " JOIN participant p ON p.id = d.participant_id"
+            " WHERE p.tasting_id = ? AND d.kind = ?",
+            (tasting_id, kind),
+        ).fetchall()
+    return {row["participant_id"] for row in rows}
+
+
+def mark_delivered(participant_id: int, kind: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO delivery (participant_id, kind) VALUES (?, ?)",
+            (participant_id, kind),
+        )
+
+
 def _tasting_of(participant_id: int) -> int:
     with connect() as conn:
         row = conn.execute(

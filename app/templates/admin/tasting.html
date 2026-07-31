@@ -153,6 +153,14 @@
   <form method="post" action="/admin/tastings/{{ tasting.id }}/recount" class="inline">
     <button type="submit">Пересчитать</button>
   </form>
+  <form method="post" action="/admin/tastings/{{ tasting.id }}/broadcast" class="inline">
+    <button type="submit">Разослать итоги в телеграм</button>
+  </form>
+  <p class="note" style="margin-top:.5rem">Второе нажатие никому не пришлёт
+    сообщение дважды: отмечается только успешная отправка, поэтому повтор
+    догоняет тех, кому не дошло, и тех, кто привязал телеграм позже.
+    {% if participants %}Без привязки сейчас:
+    {{ participants | rejectattr('tg_chat_id') | list | length }}.{% endif %}</p>
   <p class="note">Таблица итогов — кэш, а не источник истины: пересчёт всегда
     делается из ответов заново, поэтому кнопку можно жать сколько угодно.</p>
 </section>

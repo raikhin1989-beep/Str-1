@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import ai, auth, models
+from app import ai, auth, broadcast, models
 from app.config import admin_password
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -191,6 +191,25 @@ def change_status(tasting_id: int, status: str = Form(...)):
     if status in models.RESULT_STATUSES:
         models.compute_results(tasting_id)
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Статус изменён")
+
+
+@router.post("/tastings/{tasting_id}/broadcast", dependencies=[Depends(require_admin)])
+def send_results(request: Request, tasting_id: int):
+    """Разослать итоги в телеграм. Повторное нажатие догоняет только тех, кому не дошло."""
+    tasting = models.get_tasting(tasting_id)
+    if tasting is None:
+        raise HTTPException(status_code=404, detail="Дегустация не найдена")
+    url = str(request.base_url).rstrip("/") + f"/results/{tasting['public_code']}"
+    try:
+        report = broadcast.send_results(tasting_id, url)
+    except ValueError as err:
+        return _redirect(f"/admin/tastings/{tasting_id}?error={err}")
+
+    parts = [f"отправлено: {len(report['sent'])}"]
+    for label, key in (("уже было", "skipped"), ("без телеграма", "unlinked"), ("не дошло", "failed")):
+        if report[key]:
+            parts.append(f"{label}: {', '.join(report[key])}")
+    return _redirect(f"/admin/tastings/{tasting_id}?ok=Рассылка — {'; '.join(parts)}")
 
 
 @router.post("/tastings/{tasting_id}/recount", dependencies=[Depends(require_admin)])
