@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ whisky.name }}{% endblock %}
+
+{% block content %}
+<h1 class="title">{{ whisky.name }}</h1>
+<p class="lead">
+  {{ whisky.wclass or "виски" }}{% if whisky.distillery %}, {{ whisky.distillery }}{% endif %}{% if whisky.region %}, {{ whisky.region }}{% endif %}
+</p>
+
+{# %g убирает лишний ноль: 40.0 → 40, но 43.5 остаётся 43.5 #}
+{% set facts = [
+  ("Крепость", ("%g %%" | format(whisky.abv)) if whisky.abv else None),
+  ("Выдержка", (whisky.age_years ~ " лет") if whisky.age_years else None),
+  ("Бочка", whisky.cask),
+  ("Сырьё", whisky.grain),
+  ("Холодная фильтрация", whisky.filtration),
+  ("Цена", (whisky.price_rub ~ " ₽") if whisky.price_rub else None),
+  ("Цвет", whisky.colour),
+] %}
+{% if facts | selectattr(1) | list %}
+<section class="card">
+  <h2>Вводные</h2>
+  <dl class="facts">
+    {% for label, value in facts %}{% if value %}
+      <dt>{{ label }}</dt><dd>{{ value }}</dd>
+    {% endif %}{% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+{% set senses = [("Нос", whisky.nose), ("Вкус", whisky.palate), ("Послевкусие", whisky.finish)] %}
+{% if senses | selectattr(1) | list %}
+<section class="card">
+  <h2>Как пьётся</h2>
+  <dl class="facts">
+    {% for label, value in senses %}{% if value %}
+      <dt>{{ label }}</dt><dd>{{ value }}</dd>
+    {% endif %}{% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+{% if whisky.notes %}
+<section class="card">
+  <h2>Заметки</h2>
+  <p>{{ whisky.notes }}</p>
+</section>
+{% endif %}
+
+{% if whisky.source == "ai" %}
+<p class="note">Данные ориентировочные: получены моделью, а не из каталога производителя.</p>
+{% endif %}
+
+<p class="note"><a href="/whisky">← к поиску</a></p>
+{% endblock %}

@@ -116,6 +116,26 @@ def get_whisky(whisky_id: int) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM whisky WHERE id = ?", (whisky_id,)).fetchone()
 
 
+def search_whiskies(query: str) -> list[sqlite3.Row]:
+    """Поиск по названию, винокурне и региону.
+
+    Фильтруем в Python, а не в SQL: LIKE в SQLite регистронезависим только для
+    латиницы, и «аберлауэр» не нашёл бы «Аберлауэр». Справочник — десятки
+    записей, разница в скорости незаметна.
+    """
+    needle = query.strip().casefold()
+    if not needle:
+        return list_whiskies()
+    return [
+        row
+        for row in list_whiskies()
+        if any(
+            needle in (row[field] or "").casefold()
+            for field in ("name", "distillery", "region")
+        )
+    ]
+
+
 def save_whisky(data: dict, whisky_id: int | None = None) -> int:
     """Создать или обновить запись справочника. source остаётся manual."""
     values = {k: _clean(data.get(k)) for k in WHISKY_FIELDS}

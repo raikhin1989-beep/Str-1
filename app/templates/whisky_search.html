@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Поиск виски{% endblock %}
+
+{% block content %}
+<h1 class="title">Что за виски?</h1>
+<p class="lead">Введите название — покажем цвет, нос, вкус, послевкусие и остальное.</p>
+
+<form method="get" action="/whisky" class="form row">
+  <input name="q" value="{{ query }}" placeholder="Aberlour, Далмор, Speyside…"
+         autocomplete="off" aria-label="Название виски" autofocus>
+  <button type="submit">Найти</button>
+</form>
+
+{% if found %}
+  <p class="note">{% if searched %}Нашлось: {{ found|length }}{% else %}В справочнике {{ found|length }} записей{% endif %}</p>
+  <ul class="cards">
+    {% for w in found %}
+    <li>
+      <a class="card cardlink" href="/whisky/{{ w.id }}">
+        <strong>{{ w.name }}</strong>
+        <span class="meta">
+          {{ w.wclass or "виски" }}{% if w.region %}, {{ w.region }}{% endif %}{% if w.abv %}, {{ w.abv }} %{% endif %}
+        </span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+{% elif searched %}
+  <section class="card">
+    <p>По запросу «{{ query }}» ничего не нашлось.</p>
+    <p class="note">Скоро здесь появится распознавание по названию и по фотографии
+      бутылки — тогда отвечать будем и на то, чего нет в справочнике.</p>
+  </section>
+{% else %}
+  <p class="note">Справочник пока пуст.</p>
+{% endif %}
+
+<p class="note"><a href="/">← на главную</a></p>
+{% endblock %}

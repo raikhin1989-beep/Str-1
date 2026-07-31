@@ -72,6 +72,30 @@ body {
 
 a { color: var(--amber); }
 
+/* ── публичные страницы ──────────────────────────────────────────────────── */
+
+.cards { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+
+.cardlink {
+  display: block;
+  color: var(--text);
+  text-decoration: none;
+  padding: .9rem 1.1rem;
+}
+
+.cardlink:hover { border-color: var(--amber); }
+.cardlink strong { display: block; font-weight: 600; }
+.cardlink .meta { color: var(--muted); font-size: .9rem; }
+
+.facts { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+
+@media (max-width: 26rem) {
+  .facts { grid-template-columns: 1fr; gap: 0 0; }
+  .facts dd { margin-bottom: .6rem; }
+}
+
 /* ── админка ─────────────────────────────────────────────────────────────── */
 
 .adminnav {

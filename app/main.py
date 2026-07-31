@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 
 from app.admin import router as admin_router
+from app.public import router as public_router
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -25,6 +26,7 @@ app = FastAPI(
 )
 
 
+app.include_router(public_router)
 app.include_router(admin_router)
 
 
