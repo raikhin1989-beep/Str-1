@@ -108,6 +108,7 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
       YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+      AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
     steps:
       # Проверка до первого подключения: иначе про незаданный секрет узнаёшь из
       # невнятной ошибки ssh-action, а не из явного сообщения.
@@ -259,7 +260,7 @@ jobs:
           command_timeout: 10m
           # Каждый секрет нужно перечислить здесь поимённо: ssh-action передаёт
           # на сервер только то, что указано в envs, остальное молча теряется.
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -286,6 +287,10 @@ jobs:
               echo "YANDEX_API_KEY: задан (${#YANDEX_API_KEY} символов), каталог задан"
             elif [ -n "$YANDEX_API_KEY" ] || [ -n "$YANDEX_FOLDER_ID" ]; then
               echo "::warning::у Яндекса нужны оба секрета — YANDEX_API_KEY и YANDEX_FOLDER_ID; задан только один"
+            fi
+            if [ -n "$AI_PROVIDER" ]; then
+              printf 'AI_PROVIDER=%s\n' "$AI_PROVIDER" >> /etc/str-1/app.env
+              echo "AI_PROVIDER: $AI_PROVIDER (выбор провайдера задан явно)"
             fi
             if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$YANDEX_API_KEY" ]; then
               echo "::warning::ключей распознавания нет — поиск виски работает только по справочнику"
