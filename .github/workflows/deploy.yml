@@ -34,6 +34,7 @@ name: Deploy to server
 #   DUCKDNS_SUBDOMAIN — метка поддомена      [для домена и HTTPS]
 #   DUCKDNS_TOKEN     — токен аккаунта DuckDNS [для домена и HTTPS]
 #   ADMIN_PASSWORD    — пароль админки       [без него /admin отвечает 503]
+#   ANTHROPIC_API_KEY — ключ Anthropic API   [без него распознавание выключено]
 #
 # Секреты попадают в приложение через /etc/str-1/app.env (права 600, владелец
 # str1) и в логи не пишутся: проверяется только факт наличия.
@@ -102,6 +103,7 @@ jobs:
       # Контекст secrets недоступен в step-level if, поэтому раскрываем здесь.
       HAS_DUCKDNS: ${{ secrets.DUCKDNS_SUBDOMAIN != '' && secrets.DUCKDNS_TOKEN != '' }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       # Проверка до первого подключения: иначе про незаданный секрет узнаёшь из
       # невнятной ошибки ssh-action, а не из явного сообщения.
@@ -267,6 +269,12 @@ jobs:
               echo "ADMIN_PASSWORD: задан (${#ADMIN_PASSWORD} символов)"
             else
               echo "::warning::ADMIN_PASSWORD не задан — админка будет отвечать 503"
+            fi
+            if [ -n "$ANTHROPIC_API_KEY" ]; then
+              printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >> /etc/str-1/app.env
+              echo "ANTHROPIC_API_KEY: задан (${#ANTHROPIC_API_KEY} символов)"
+            else
+              echo "::warning::ANTHROPIC_API_KEY не задан — распознавание виски будет выключено"
             fi
             umask 022
             chown root:str1 /etc/str-1/app.env

@@ -46,12 +46,22 @@ def test_search_finds_by_region(client):
     assert "Aberlour 13" not in response.text
 
 
-def test_search_without_matches_offers_photo(client):
+def test_search_without_matches_says_so(client):
     _fill_catalogue()
     response = client.get("/whisky", params={"q": "такого нет"})
     assert response.status_code == 200
-    assert "ничего не нашлось" in response.text
-    assert "фотографии" in response.text
+    assert "ничего нет" in response.text
+
+
+def test_search_offers_ai_only_when_key_is_present(client, monkeypatch):
+    _fill_catalogue()
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert "Спросить у ИИ" not in client.get("/whisky", params={"q": "нет такого"}).text
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "тестовый-ключ")
+    with_key = client.get("/whisky", params={"q": "нет такого"}).text
+    assert "Спросить у ИИ" in with_key
+    assert "Сфотографируйте этикетку" in with_key
 
 
 def test_card_shows_filled_fields_only(client):

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import auth, models
+from app import ai, auth, models
 from app.config import admin_password
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -226,6 +226,23 @@ async def create_whisky(request: Request):
     except ValueError as err:
         return _redirect(f"/admin/whiskies?error={err}")
     return _redirect(f"/admin/whiskies/{whisky_id}?ok=Добавлено")
+
+
+@router.post("/whiskies/import", dependencies=[Depends(require_admin)])
+def import_whisky_from_ai(cache_key: str = Form(...)):
+    """Сохранить в справочник карточку, полученную от модели.
+
+    Берём её из кэша по ключу, а не из формы: так в базу попадает ровно то, что
+    ответила модель, и подменить поля через скрытые input'ы нельзя.
+    """
+    card = ai.cached_card(cache_key)
+    if card is None:
+        return _redirect("/admin/whiskies?error=Карточка не найдена, распознайте заново")
+    try:
+        whisky_id = models.save_whisky(card, source="ai")
+    except ValueError as err:
+        return _redirect(f"/admin/whiskies?error={err}")
+    return _redirect(f"/admin/whiskies/{whisky_id}?ok=Добавлено из распознавания — проверьте поля")
 
 
 @router.get("/whiskies/{whisky_id}", dependencies=[Depends(require_admin)])

@@ -28,12 +28,29 @@
   </ul>
 {% elif searched %}
   <section class="card">
-    <p>По запросу «{{ query }}» ничего не нашлось.</p>
-    <p class="note">Скоро здесь появится распознавание по названию и по фотографии
-      бутылки — тогда отвечать будем и на то, чего нет в справочнике.</p>
+    <p>В справочнике по запросу «{{ query }}» ничего нет.</p>
+    {% if ai_available %}
+    <form method="post" action="/whisky/ask" class="inline">
+      <input type="hidden" name="q" value="{{ query }}">
+      <button type="submit">Спросить у ИИ</button>
+    </form>
+    {% endif %}
   </section>
 {% else %}
   <p class="note">Справочник пока пуст.</p>
+{% endif %}
+
+{% if ai_available %}
+<section class="card">
+  <h2>Не знаете названия?</h2>
+  <p>Сфотографируйте этикетку — распознаем по фото.</p>
+  <form method="post" action="/whisky/photo" enctype="multipart/form-data" class="form">
+    {# capture=environment открывает камеру сразу, а не галерею #}
+    <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" capture="environment" required>
+    <button type="submit">Распознать</button>
+  </form>
+  <p class="note">До 5 МБ. Данные от модели ориентировочные.</p>
+</section>
 {% endif %}
 
 <p class="note"><a href="/">← на главную</a></p>

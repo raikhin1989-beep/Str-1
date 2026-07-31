@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{{ card.name or "Распознавание" }}{% endblock %}
+
+{% block content %}
+{% if card.recognized %}
+  <h1 class="title">{{ card.name }}</h1>
+  <p class="lead">
+    {{ card.wclass or "виски" }}{% if card.distillery %}, {{ card.distillery }}{% endif %}{% if card.region %}, {{ card.region }}{% endif %}
+  </p>
+{% else %}
+  <h1 class="title">Не узнал</h1>
+  <p class="lead">{{ card.comment or "Не удалось определить, что это за виски." }}</p>
+{% endif %}
+
+{% if card.recognized %}
+  {% set facts = [
+    ("Крепость", (card.abv ~ " %") if card.abv else None),
+    ("Выдержка", (card.age_years ~ " лет") if card.age_years else None),
+    ("Бочка", card.cask),
+    ("Сырьё", card.grain),
+    ("Холодная фильтрация", card.filtration),
+    ("Цена", (card.price_rub ~ " ₽, ориентировочно") if card.price_rub else None),
+    ("Цвет", card.colour),
+  ] %}
+  {% if facts | selectattr(1) | list %}
+  <section class="card">
+    <h2>Вводные</h2>
+    <dl class="facts">
+      {% for label, value in facts %}{% if value %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endif %}{% endfor %}
+    </dl>
+  </section>
+  {% endif %}
+
+  {% set senses = [("Нос", card.nose), ("Вкус", card.palate), ("Послевкусие", card.finish)] %}
+  {% if senses | selectattr(1) | list %}
+  <section class="card">
+    <h2>Как пьётся</h2>
+    <dl class="facts">
+      {% for label, value in senses %}{% if value %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endif %}{% endfor %}
+    </dl>
+  </section>
+  {% endif %}
+
+  {% if card.comment %}<p class="note">{{ card.comment }}</p>{% endif %}
+
+  <p class="note">
+    Данные ориентировочные: получены моделью, а не из каталога производителя.
+    Уверенность — {{ card.confidence or "не указана" }}. Крепость и цену стоит
+    сверить с этикеткой.
+  </p>
+
+  {% if is_admin %}
+  <form method="post" action="/admin/whiskies/import" class="inline">
+    <input type="hidden" name="cache_key" value="{{ cache_key }}">
+    <button type="submit">Добавить в справочник</button>
+  </form>
+  {% endif %}
+{% endif %}
+
+<p class="note"><a href="/whisky">← к поиску</a></p>
+{% endblock %}

@@ -104,8 +104,8 @@ pytest.ini           корень репозитория в sys.path для те
 | `SERVER_HOST`, `SERVER_PASSWORD` | Доступ к серверу | да |
 | `SERVER_USER`, `SERVER_PORT` | По умолчанию `root` и `22` | нет |
 | `DUCKDNS_SUBDOMAIN`, `DUCKDNS_TOKEN` | Домен и сертификат | для HTTPS |
-| `ADMIN_PASSWORD` | Вход в админку | шаг 2 |
-| `ANTHROPIC_API_KEY` | Распознавание виски по названию и фото | шаг 4 |
+| `ADMIN_PASSWORD` | Вход в админку | да |
+| `ANTHROPIC_API_KEY` | Распознавание виски по названию и фото | да |
 | `TELEGRAM_BOT_TOKEN` | Бот `@raikhinwhiskey_bot` | шаг 5 |
 | `TELEGRAM_WEBHOOK_SECRET` | Секретный путь вебхука, придумывается произвольно | шаг 5 |
 

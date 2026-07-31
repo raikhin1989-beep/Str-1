@@ -136,8 +136,13 @@ def search_whiskies(query: str) -> list[sqlite3.Row]:
     ]
 
 
-def save_whisky(data: dict, whisky_id: int | None = None) -> int:
-    """Создать или обновить запись справочника. source остаётся manual."""
+def save_whisky(data: dict, whisky_id: int | None = None, source: str = "manual") -> int:
+    """Создать или обновить запись справочника.
+
+    source='ai' помечает карточку, полученную от модели: на публичной странице
+    у такой стоит пометка «данные ориентировочные». Правка через админку
+    источник не меняет — пометка снимается вручную, когда данные сверены.
+    """
     values = {k: _clean(data.get(k)) for k in WHISKY_FIELDS}
     if not values["name"]:
         raise ValueError("у виски должно быть название")
@@ -153,8 +158,8 @@ def save_whisky(data: dict, whisky_id: int | None = None) -> int:
             columns = ", ".join(WHISKY_FIELDS)
             marks = ", ".join("?" for _ in WHISKY_FIELDS)
             cur = conn.execute(
-                f"INSERT INTO whisky ({columns}) VALUES ({marks})",
-                [values[k] for k in WHISKY_FIELDS],
+                f"INSERT INTO whisky ({columns}, source) VALUES ({marks}, ?)",
+                [values[k] for k in WHISKY_FIELDS] + [source],
             )
             return int(cur.lastrowid)
         assignments = ", ".join(f"{k} = ?" for k in WHISKY_FIELDS)
