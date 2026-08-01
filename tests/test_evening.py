@@ -133,8 +133,10 @@ def test_a_whole_evening(admin, client, bot):
 
     results = client.get(f"/results/{code}").text
     assert "Турнирная таблица" in results
+    # Через escape: какой виски окажется первым, решает перемешивание, а в
+    # «Jack Daniel's» апостроф на странице выглядит как &#39;.
     poured = models.tasting_whiskies(tasting_id)[0]["name"]
-    assert poured in results, "теперь состав раскрыт"
+    assert str(escape(poured)) in results, "теперь состав раскрыт"
 
     live = client.get(f"/api/board/{code}").json()
     assert live["rows"][0]["name"] == "Саша"
