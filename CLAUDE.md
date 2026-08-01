@@ -8,7 +8,7 @@ A site in `site/`, deployed over SSH to the **same server that already hosts the
 
 **What this is becoming:** a web app for a whisky tasting competition — public whisky lookup by name or bottle photo, participant registration, two blind rounds (by nose, then by palate), leaderboard, admin panel, results delivered over Telegram. Live at `https://raikhinwhiskey.duckdns.org/`. The plan and its acceptance criteria are in [`docs/PLAN.md`](docs/PLAN.md); architecture, data model, scoring rules and operations live alongside it in `docs/`. **Read `docs/PLAN.md` before starting work** — it defines the step the repository is currently on.
 
-At present `site/` is still the placeholder page and no application code exists yet. Until step 1 of the plan lands there is no build system, package manifest, linter, or test suite, and `site/` is hand-written content served as-is; don't assume npm/pip/make targets exist. From step 1 onward the app is Python (FastAPI + SQLite) under `app/`, with pytest gating the deploy — see `docs/ARCHITECTURE.md`.
+The application is built and live: steps 0–11 of the plan are done, step 12 waits for a real evening by its own condition. The app is Python (FastAPI + Jinja2 + SQLite) under `app/`, with pytest gating the deploy; `site/` holds only what Caddy serves as files — `healthz`, the fallback page and `static/`. There is no frontend build and no npm on the server; run the tests with `pytest -q`. See `docs/ARCHITECTURE.md` for the map and `docs/RUNBOOK.md` for what to do when something breaks.
 
 ## Sharing a server with `Str` — read before touching the deploy
 

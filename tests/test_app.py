@@ -79,3 +79,11 @@ def test_pages_carry_a_link_preview(client):
 def test_description_is_page_specific(client):
     assert "покажем цвет, нос" in client.get("/whisky").text
     assert "два круга" in client.get("/").text
+
+
+def test_the_home_page_describes_a_working_site(client):
+    """Обещать «что появится дальше» на готовом сайте — обманывать гостя."""
+    page = client.get("/").text
+    assert "появится" not in page
+    assert "Как считаются очки" in page
+    assert "Открыть поиск" in page
