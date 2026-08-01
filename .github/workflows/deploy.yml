@@ -59,7 +59,7 @@ on:
       action:
         description: "Что сделать на сервере"
         type: choice
-        options: [deploy, inspect]
+        options: [deploy, inspect, broadcast]
         default: deploy
 
 concurrency:
@@ -743,6 +743,74 @@ jobs:
               esac
             fi
           fi
+
+  # ── BROADCAST: развезти итоги в телеграм ───────────────────────────────────
+  # Существует потому, что с сервера исходящие к api.telegram.org не проходят
+  # (TCP-таймаут, проверено на выкате). Отсюда — проходят. Приложение готовит
+  # сообщения, раннер отправляет и докладывает, что дошло; отметка о доставке
+  # ставится только по докладу, поэтому повтор безопасен.
+  broadcast:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'broadcast' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send results
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          SUBDOMAIN: ${{ secrets.DUCKDNS_SUBDOMAIN }}
+        run: |
+          set -e
+          if [ -z "$TOKEN" ] || [ -z "$SECRET" ] || [ -z "$SUBDOMAIN" ]; then
+            echo "::error::нужны TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET и DUCKDNS_SUBDOMAIN"
+            exit 1
+          fi
+          site="https://$SUBDOMAIN.duckdns.org"
+
+          # Адрес с секретом в лог не печатаем — он и есть ключ к списку.
+          curl -fsS --max-time 30 "$site/internal/outbox/$SECRET" > outbox.json || {
+            echo "::error::сайт не отдал список рассылки"; exit 1;
+          }
+          python3 - <<'PY' > report.json
+          import json, os, sys, urllib.request
+
+          box = json.load(open("outbox.json"))
+          print(f"дегустация: {box.get('tasting')}, к отправке: {box.get('count', 0)}", file=sys.stderr)
+
+          token = os.environ["TOKEN"]
+          delivered, failed = [], []
+          for message in box.get("messages", []):
+              payload = json.dumps({
+                  "chat_id": message["chat_id"],
+                  "text": message["text"],
+                  "parse_mode": "HTML",
+              }).encode()
+              request = urllib.request.Request(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  data=payload,
+                  headers={"Content-Type": "application/json"},
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      ok = bool(json.load(response).get("ok"))
+              except Exception as err:
+                  # Сбой у одного не должен ронять рассылку остальным: этот
+                  # участник просто не попадёт в отметку и догонится повтором.
+                  print(f"не дошло {message['participant_id']}: {type(err).__name__}", file=sys.stderr)
+                  ok = False
+              (delivered if ok else failed).append(message["participant_id"])
+          print(json.dumps({"ids": delivered, "failed": failed}))
+          PY
+
+          delivered=$(python3 -c "import json;print(len(json.load(open('report.json'))['ids']))")
+          failed=$(python3 -c "import json;print(len(json.load(open('report.json'))['failed']))")
+          echo "отправлено: $delivered, не дошло: $failed"
+
+          if [ "$delivered" != "0" ]; then
+            curl -fsS --max-time 30 -X POST "$site/internal/outbox/$SECRET/delivered" \
+              -H 'Content-Type: application/json' --data @report.json > /dev/null
+            echo "отметки о доставке записаны"
+          fi
+          [ "$failed" = "0" ] || echo "::warning::часть сообщений не дошла — повторный запуск догонит"
 
   # ── INSPECT: только осмотреть сервер, ничего не менять ──────────────────────
   inspect:

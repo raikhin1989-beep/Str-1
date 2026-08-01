@@ -128,7 +128,8 @@ def test_names_are_escaped(finished, sent):
     assert "&lt;b&gt;Саша&lt;/b&gt;" in to_sasha
 
 
-def test_admin_button_reports_who_got_it(admin, finished, sent):
+def test_admin_route_still_reports_who_got_it(admin, finished, sent):
+    """Прямая отправка осталась в коде — она заработает после переезда хостинга."""
     response = admin.post(
         f"/admin/tastings/{finished['id']}/broadcast", follow_redirects=True
     )
@@ -136,9 +137,14 @@ def test_admin_button_reports_who_got_it(admin, finished, sent):
     assert "без телеграма: Костя" in response.text
 
 
+def test_admin_page_explains_where_the_broadcast_happens(admin, finished):
+    page = admin.get(f"/admin/tastings/{finished['id']}").text
+    assert "broadcast" in page and "Actions" in page
+
+
 def test_a_ready_made_text_is_offered_for_manual_sending(admin, finished):
     """С этого сервера исходящие к телеграму не идут — текст нужен под рукой."""
     page = admin.get(f"/admin/tastings/{finished['id']}").text
-    assert "отправить руками" in page
+    assert "отправьте текст сами" in page
     assert "1. Саша — " in page
     assert "/results/" in page

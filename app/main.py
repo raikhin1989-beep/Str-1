@@ -17,6 +17,7 @@ from app import ai, telegram
 from app.admin import router as admin_router
 from app.config import admin_password
 from app.join import router as join_router
+from app.outbox import router as outbox_router
 from app.public import router as public_router
 
 log = logging.getLogger("str1.app")
@@ -37,6 +38,7 @@ app = FastAPI(
 app.include_router(public_router)
 app.include_router(join_router)
 app.include_router(admin_router)
+app.include_router(outbox_router)
 
 
 @app.get("/api/health")

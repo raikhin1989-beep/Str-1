@@ -155,22 +155,23 @@
   <form method="post" action="/admin/tastings/{{ tasting.id }}/recount" class="inline">
     <button type="submit">Пересчитать</button>
   </form>
-  <form method="post" action="/admin/tastings/{{ tasting.id }}/broadcast" class="inline">
-    <button type="submit">Разослать итоги в телеграм</button>
-  </form>
-  <p class="note" style="margin-top:.5rem">Второе нажатие никому не пришлёт
-    сообщение дважды: отмечается только успешная отправка, поэтому повтор
-    догоняет тех, кому не дошло, и тех, кто привязал телеграм позже.
-    {% if participants %}Без привязки сейчас:
-    {{ participants | rejectattr('tg_chat_id') | list | length }}.{% endif %}</p>
   <p class="note">Таблица итогов — кэш, а не источник истины: пересчёт всегда
     делается из ответов заново, поэтому кнопку можно жать сколько угодно.</p>
 
-  <label for="summary">Тот же текст, чтобы отправить руками</label>
+  <h2 style="margin-top:1.5rem">Разослать итоги</h2>
+  <p>Рассылку везёт GitHub — с этого сервера исходящие к api.telegram.org
+     не проходят. Actions → «Deploy to server» → Run workflow → действие
+     <code>broadcast</code>.</p>
+  <p class="note" style="margin-top:.5rem">Раннер забирает готовые сообщения
+    у сайта, отправляет и докладывает, что дошло. Отметка ставится только по
+    докладу, поэтому повтор никому не пришлёт дважды, а тем, кому не дошло, —
+    догонит.
+    {% if participants %}Без привязанного телеграма сейчас:
+    {{ participants | rejectattr('tg_chat_id') | list | length }}.{% endif %}</p>
+
+  <label for="summary">Или отправьте текст сами</label>
   <textarea id="summary" rows="8" readonly onclick="this.select()">{{ summary }}</textarea>
-  <p class="note" style="margin-top:.5rem">Пригодится, если рассылка не проходит:
-    с этого сервера исходящие к api.telegram.org не идут. Нажмите на поле —
-    выделится целиком.</p>
+  <p class="note" style="margin-top:.5rem">Нажмите на поле — выделится целиком.</p>
 </section>
 {% endif %}
 

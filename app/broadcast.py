@@ -55,6 +55,47 @@ def send_results(tasting_id: int, results_url: str) -> dict:
     return report
 
 
+def pending(tasting_id: int, results_url: str) -> list[dict]:
+    """Что осталось отправить: кому, куда и какой текст.
+
+    Ничего не отправляет и ничего не отмечает — только готовит. Нужно для
+    рассылки чужими руками: с этого сервера исходящие к api.telegram.org
+    не проходят, поэтому сообщения отвозит раннер GitHub, у которого доступ
+    есть (см. docs/RUNBOOK.md и job `broadcast` в деплое).
+    """
+    tasting = models.get_tasting(tasting_id)
+    if tasting is None or tasting["status"] not in models.RESULT_STATUSES:
+        return []
+    board = models.leaderboard(tasting_id)
+    if not board:
+        return []
+
+    scores = models.score_tasting(tasting_id)
+    whiskies = {row["id"]: row["name"] for row in models.round_choices(tasting_id)}
+    top = _top_lines(board)
+    already = models.delivered(tasting_id, KIND)
+    total_points = scoring.max_points(len(models.sample_numbers(tasting_id)))
+
+    return [
+        {
+            "participant_id": row["id"],
+            "chat_id": row["tg_chat_id"],
+            "text": compose(row, scores.get(row["id"]), whiskies, top, total_points,
+                            tasting["title"], results_url, len(board)),
+        }
+        for row in board
+        if row["tg_chat_id"] and row["id"] not in already
+    ]
+
+
+def latest_scored_tasting() -> int | None:
+    """Последняя дегустация, у которой есть итоги. Ей и нужна рассылка."""
+    for tasting in models.list_tastings():
+        if tasting["status"] in models.RESULT_STATUSES:
+            return int(tasting["id"])
+    return None
+
+
 def compose(row, score, whiskies, top, max_points, title, results_url, people) -> str:
     """Личное сообщение. HTML — потому что send_message шлёт с parse_mode=HTML."""
     name = html.escape(row["name"])
