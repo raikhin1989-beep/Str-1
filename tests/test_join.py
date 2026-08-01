@@ -152,3 +152,27 @@ def test_admin_sees_the_link_and_the_guest_list(client):
 
 def test_personal_page_of_a_stranger_is_404(client):
     assert client.get("/me/чужой-токен").status_code == 404
+
+
+def test_qr_is_black_on_white_with_a_quiet_zone(client):
+    """Код сканируют с чужого экрана: фон должен быть в самой картинке."""
+    svg = client.get("/qr.svg", params={"data": "https://example.org/join/abc"}).text
+    assert 'fill="white"' in svg, "прозрачный фон на тёмной теме нечитаем"
+    # Поле в 4 модуля по спецификации: с меньшим часть телефонов не ловит код.
+    assert svg.count("M4,4H5V5H4z") or "M4,4" in svg
+
+
+def test_guest_links_use_the_public_address(admin, monkeypatch):
+    """Админку открывают и по запасному входу — гостю нужен домен."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://raikhinwhiskey.duckdns.org")
+    tasting_id = models.create_tasting("Первая", None, "class")
+    page = admin.get(f"/admin/tastings/{tasting_id}").text
+    assert "https://raikhinwhiskey.duckdns.org/join/" in page
+    assert "testserver/join/" not in page
+
+
+def test_without_the_public_address_links_fall_back_to_the_current_one(admin, monkeypatch):
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    tasting_id = models.create_tasting("Первая", None, "class")
+    page = admin.get(f"/admin/tastings/{tasting_id}").text
+    assert "http://testserver/join/" in page

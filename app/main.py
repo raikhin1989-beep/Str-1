@@ -57,6 +57,9 @@ def health() -> dict:
         "ai_provider": ai.provider(),
         "ai_photo": ai.supports_images(),
         "telegram": telegram.is_configured(),
+        # Имя бота: без него не собрать ссылку привязки, и гость
+        # видит «бот недоступен». Проще проверить здесь, чем гадать.
+        "telegram_bot": telegram.bot_username(),
     }
 
 

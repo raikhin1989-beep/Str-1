@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
 from app import ai, auth, backup, broadcast, models
-from app.config import admin_password
+from app.config import admin_password, public_base_url
 from app.db import connect, log_action
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -28,6 +28,12 @@ def _redirect(url: str) -> RedirectResponse:
     # 303: после POST браузер должен перейти на страницу методом GET,
     # иначе обновление страницы повторит действие.
     return RedirectResponse(url, status_code=303)
+
+
+def _public(request: Request, path: str) -> str:
+    """Ссылка для гостей. Публичный адрес важнее того, где открыта админка."""
+    base = public_base_url() or str(request.base_url).rstrip("/")
+    return f"{base}{path}"
 
 
 def _note(request: Request, action: str, details: str = "") -> None:
@@ -148,9 +154,9 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
         raise HTTPException(status_code=404, detail="Дегустация не найдена")
     in_tasting = models.tasting_whiskies(tasting_id)
     chosen = {row["id"] for row in in_tasting}
-    # Ссылку собираем из адреса запроса: домен приложение из конфига не знает,
-    # а показать гостям надо ровно тот, по которому админ сейчас сидит.
-    join_url = str(request.base_url).rstrip("/") + f"/join/{tasting['public_code']}"
+    # Ссылки для гостей — от публичного адреса (см. _public): админку могут
+    # открыть и по запасному входу на 8081, а гостю нужен домен.
+    join_url = _public(request, f"/join/{tasting['public_code']}")
     round_name = models.open_round(tasting)
     done, total = models.round_progress(tasting_id, round_name) if round_name else (0, 0)
     return templates.TemplateResponse(
@@ -164,8 +170,8 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             "round_total": total,
             "scored": tasting["status"] in models.RESULT_STATUSES,
             "board": models.leaderboard(tasting_id),
-            "results_url": str(request.base_url).rstrip("/") + f"/results/{tasting['public_code']}",
-            "board_url": str(request.base_url).rstrip("/") + f"/board/{tasting['public_code']}",
+            "results_url": _public(request, f"/results/{tasting['public_code']}"),
+            "board_url": _public(request, f"/board/{tasting['public_code']}"),
             "participants": models.list_participants(tasting_id),
             "join_url": join_url,
             "samples": in_tasting,
@@ -237,7 +243,7 @@ def send_results(request: Request, tasting_id: int):
     tasting = models.get_tasting(tasting_id)
     if tasting is None:
         raise HTTPException(status_code=404, detail="Дегустация не найдена")
-    url = str(request.base_url).rstrip("/") + f"/results/{tasting['public_code']}"
+    url = _public(request, f"/results/{tasting['public_code']}")
     try:
         report = broadcast.send_results(tasting_id, url)
     except ValueError as err:

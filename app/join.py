@@ -253,10 +253,23 @@ def board_data(code: str):
 
 @router.get("/qr.svg")
 def qr(data: str):
-    """QR-код для ссылки. SVG, потому что не требует ни Pillow, ни растра."""
+    """QR-код для ссылки. SVG, потому что не требует ни Pillow, ни растра.
+
+    Белый фон рисуется внутри самой картинки, а не задаётся стилем страницы:
+    код сканируют с чужого экрана, картинку пересылают и пересохраняют, и
+    прозрачный фон на тёмной теме превращает её в нечитаемое пятно.
+
+    Поле в 4 модуля — по спецификации QR. С двумя, как было раньше, часть
+    телефонов код не ловит: камере не за что зацепиться.
+    """
     if len(data) > 512:
         raise HTTPException(status_code=400, detail="Слишком длинная ссылка")
-    image = qrcode.make(data, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
+    image = qrcode.make(
+        data,
+        image_factory=qrcode.image.svg.SvgPathFillImage,
+        box_size=10,
+        border=4,
+    )
     buffer = io.BytesIO()
     image.save(buffer)
     return Response(

@@ -26,6 +26,17 @@ def session_ttl_days() -> int:
     return int(os.environ.get("STR1_SESSION_TTL_DAYS", "14"))
 
 
+def public_base_url() -> str:
+    """Адрес, по которому сайт открывают гости.
+
+    Нужен для ссылок и QR-кодов. Без него они собираются из адреса, по которому
+    сейчас открыта админка, — а её открывают и по запасному входу
+    `http://<адрес>:8081/`, и тогда гостю уезжает ссылка на порт 8081 вместо
+    домена. Задаётся деплоем из SITE_DOMAIN.
+    """
+    return os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+
 def anthropic_key() -> str:
     return os.environ.get("ANTHROPIC_API_KEY", "")
 

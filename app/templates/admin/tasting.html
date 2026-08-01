@@ -83,7 +83,9 @@
   {% if tasting.public_code %}
   <p class="note">Ссылка для гостей — покажите QR со своего экрана или пришлите адрес:</p>
   <p><a href="{{ join_url }}">{{ join_url }}</a></p>
-  <img class="qr" src="/qr.svg?data={{ join_url | urlencode }}" alt="QR-код регистрации" width="200" height="200">
+  <img class="qr" src="/qr.svg?data={{ join_url | urlencode }}" alt="QR-код регистрации" width="280" height="280">
+  <p class="note" style="margin-top:.5rem">Не читается — увеличьте яркость экрана
+    или пришлите ссылку сообщением: она выше и работает так же.</p>
   {% if tasting.status != 'registration' %}
     <p class="note">Сейчас по ней записаться нельзя: регистрация открыта только
       в состоянии «регистрация».</p>

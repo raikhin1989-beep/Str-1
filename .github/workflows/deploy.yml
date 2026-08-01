@@ -297,8 +297,28 @@ jobs:
               printf 'TELEGRAM_BOT_TOKEN=%s\n'      "$TELEGRAM_BOT_TOKEN"      >> /etc/str-1/app.env
               printf 'TELEGRAM_WEBHOOK_SECRET=%s\n' "$TELEGRAM_WEBHOOK_SECRET" >> /etc/str-1/app.env
               echo "TELEGRAM_BOT_TOKEN: задан (${#TELEGRAM_BOT_TOKEN} символов), секрет вебхука задан"
+
+              # Имя бота выясняем здесь и кладём в окружение, а не спрашиваем
+              # у API из приложения на каждой странице: один неудачный запрос
+              # к телеграму — и гость видит «бот недоступен» вместо кнопки
+              # привязки, хотя бот жив. Здесь же промах виден в логе деплоя.
+              me=$(curl -sS --max-time 20 "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe" \
+                   | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')
+              if [ -n "$me" ]; then
+                printf 'TELEGRAM_BOT_USERNAME=%s\n' "$me" >> /etc/str-1/app.env
+                echo "бот: @$me"
+              else
+                echo "::warning::не удалось узнать имя бота — кнопка привязки телеграма не появится"
+              fi
             elif [ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$TELEGRAM_WEBHOOK_SECRET" ]; then
               echo "::warning::для бота нужны оба секрета — TELEGRAM_BOT_TOKEN и TELEGRAM_WEBHOOK_SECRET; задан только один"
+            fi
+            # Публичный адрес: по нему собираются ссылки и QR-коды для гостей.
+            # Без него они брались бы из адреса, по которому открыта админка,
+            # а её открывают и по запасному входу на 8081.
+            if [ -n "$SITE_DOMAIN" ]; then
+              printf 'PUBLIC_BASE_URL=https://%s\n' "$SITE_DOMAIN" >> /etc/str-1/app.env
+              echo "PUBLIC_BASE_URL: https://$SITE_DOMAIN"
             fi
             if [ -n "$AI_PROVIDER" ]; then
               printf 'AI_PROVIDER=%s\n' "$AI_PROVIDER" >> /etc/str-1/app.env
