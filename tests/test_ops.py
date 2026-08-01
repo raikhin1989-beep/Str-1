@@ -136,3 +136,16 @@ def test_admin_actions_are_logged(admin):
         actions = [row["action"] for row in conn.execute("SELECT action FROM audit_log")]
     assert "tasting.status" in actions
     assert "admin.login" in actions
+
+
+def test_english_boilerplate_does_not_reach_the_guest(client):
+    """«Not Found» гостю ничего не объясняет — показываем свой текст."""
+    page = client.get("/такого-нет", headers={"accept": "text/html"}).text
+    assert "Not Found" not in page
+    assert "Проверьте ссылку" in page
+
+
+def test_our_own_message_is_kept(client):
+    """А наши собственные пояснения, наоборот, доходят как есть."""
+    page = client.get("/me/такого-токена-нет", headers={"accept": "text/html"}).text
+    assert "Участник не найден" in page

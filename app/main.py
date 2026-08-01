@@ -86,10 +86,15 @@ def _wants_html(request: Request) -> bool:
 
 def _trouble(request: Request, code: int, detail: str = ""):
     title, hint = TROUBLE.get(code, ("Ошибка", "Попробуйте обновить страницу."))
+    # Свои сообщения мы пишем по-русски, а стандартные тексты Starlette —
+    # английские («Not Found»). Гостю от них никакой пользы, поэтому берём
+    # detail, только если он наш.
+    if detail and any("а" <= letter.lower() <= "я" for letter in detail):
+        hint = detail
     return templates.TemplateResponse(
         request,
         "error.html",
-        {"code": code, "trouble": title, "hint": detail or hint},
+        {"code": code, "trouble": title, "hint": hint},
         status_code=code,
     )
 
