@@ -119,11 +119,16 @@ jobs:
       # невнятной ошибки ssh-action, а не из явного сообщения.
       # Имя бота спрашиваем здесь, на раннере: у него есть доступ к
       # api.telegram.org, а у сервера в Москве — нет.
+      # Условие проверяем внутри скрипта, а не в step-level `if`: контекст
+      # secrets там недоступен, и такой workflow GitHub отвергает целиком.
       - name: Resolve bot username
-        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' }}
         env:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
+          if [ -z "$TOKEN" ]; then
+            echo "токен бота не задан — пропускаем"
+            exit 0
+          fi
           me=$(curl -sS --max-time 20 "https://api.telegram.org/bot$TOKEN/getMe" \
                | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')
           if [ -n "$me" ]; then
