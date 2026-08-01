@@ -89,6 +89,21 @@ def compose(row, score, whiskies, top, max_points, title, results_url, people) -
     return "\n".join(lines)
 
 
+def summary_text(tasting, board, results_url: str) -> str:
+    """Готовый текст итогов, чтобы отправить его руками.
+
+    Нужен, когда сервер не может достучаться до api.telegram.org: с этого
+    хостинга исходящие к телеграму не проходят, и кнопка рассылки бессильна,
+    а вечер заканчивать всё равно надо. Текст без разметки — его копируют
+    в чат как есть.
+    """
+    lines = [f"{tasting['title']} — итоги.", ""]
+    for row in board:
+        lines.append(f"{row['place']}. {row['name']} — {row['total']}")
+    lines += ["", f"Подробности и разбор по образцам: {results_url}"]
+    return "\n".join(lines)
+
+
 def _top_lines(board) -> list[str]:
     return [
         f"{row['place']}. {html.escape(row['name'])} — {row['total']}"

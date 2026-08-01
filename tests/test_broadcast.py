@@ -134,3 +134,11 @@ def test_admin_button_reports_who_got_it(admin, finished, sent):
     )
     assert "отправлено: 2" in response.text
     assert "без телеграма: Костя" in response.text
+
+
+def test_a_ready_made_text_is_offered_for_manual_sending(admin, finished):
+    """С этого сервера исходящие к телеграму не идут — текст нужен под рукой."""
+    page = admin.get(f"/admin/tastings/{finished['id']}").text
+    assert "отправить руками" in page
+    assert "1. Саша — " in page
+    assert "/results/" in page

@@ -117,6 +117,22 @@ jobs:
     steps:
       # Проверка до первого подключения: иначе про незаданный секрет узнаёшь из
       # невнятной ошибки ssh-action, а не из явного сообщения.
+      # Имя бота спрашиваем здесь, на раннере: у него есть доступ к
+      # api.telegram.org, а у сервера в Москве — нет.
+      - name: Resolve bot username
+        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          me=$(curl -sS --max-time 20 "https://api.telegram.org/bot$TOKEN/getMe" \
+               | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')
+          if [ -n "$me" ]; then
+            echo "TELEGRAM_BOT_USERNAME=$me" >> "$GITHUB_ENV"
+            echo "бот: @$me"
+          else
+            echo "::warning::телеграм не ответил на getMe — кнопка привязки не появится"
+          fi
+
       - name: Check secrets
         env:
           PASS: ${{ secrets.SERVER_PASSWORD }}
@@ -265,7 +281,7 @@ jobs:
           command_timeout: 10m
           # Каждый секрет нужно перечислить здесь поимённо: ssh-action передаёт
           # на сервер только то, что указано в envs, остальное молча теряется.
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER,AI_PHOTO,TELEGRAM_BOT_TOKEN,TELEGRAM_WEBHOOK_SECRET
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER,AI_PHOTO,TELEGRAM_BOT_TOKEN,TELEGRAM_BOT_USERNAME,TELEGRAM_WEBHOOK_SECRET
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -298,17 +314,13 @@ jobs:
               printf 'TELEGRAM_WEBHOOK_SECRET=%s\n' "$TELEGRAM_WEBHOOK_SECRET" >> /etc/str-1/app.env
               echo "TELEGRAM_BOT_TOKEN: задан (${#TELEGRAM_BOT_TOKEN} символов), секрет вебхука задан"
 
-              # Имя бота выясняем здесь и кладём в окружение, а не спрашиваем
-              # у API из приложения на каждой странице: один неудачный запрос
-              # к телеграму — и гость видит «бот недоступен» вместо кнопки
-              # привязки, хотя бот жив. Здесь же промах виден в логе деплоя.
-              me=$(curl -sS --max-time 20 "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe" \
-                   | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')
-              if [ -n "$me" ]; then
-                printf 'TELEGRAM_BOT_USERNAME=%s\n' "$me" >> /etc/str-1/app.env
-                echo "бот: @$me"
-              else
-                echo "::warning::не удалось узнать имя бота — кнопка привязки телеграма не появится"
+              # Имя бота приезжает с раннера: с самого сервера api.telegram.org
+              # недоступен (проверено — TCP-таймаут), а приложению оно нужно,
+              # чтобы собрать ссылку привязки. Ссылку открывает телефон гостя,
+              # и у него с телеграмом всё в порядке.
+              if [ -n "$TELEGRAM_BOT_USERNAME" ]; then
+                printf 'TELEGRAM_BOT_USERNAME=%s\n' "$TELEGRAM_BOT_USERNAME" >> /etc/str-1/app.env
+                echo "бот: @$TELEGRAM_BOT_USERNAME"
               fi
             elif [ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$TELEGRAM_WEBHOOK_SECRET" ]; then
               echo "::warning::для бота нужны оба секрета — TELEGRAM_BOT_TOKEN и TELEGRAM_WEBHOOK_SECRET; задан только один"

@@ -8,17 +8,25 @@
 
 import logging
 import os
+import time
 
 import httpx
 
 log = logging.getLogger("str1.telegram")
 
 API = "https://api.telegram.org"
-TIMEOUT = 20.0
+TIMEOUT = 5.0
 
-# Имя бота нужно для deep link'а. Спрашиваем у самого API и запоминаем:
-# лишний секрет заводить незачем, а меняется оно раз в никогда.
+# Имя бота нужно для deep link'а. Основной путь — переменная окружения:
+# её заполняет деплой, спросив у API с раннера GitHub. С самого сервера
+# api.telegram.org может быть недоступен (проверено: TCP-таймаут), и тогда
+# запрос отсюда — это только потерянные секунды на каждой странице.
+#
+# Запоминаем и неудачу тоже: без этого каждая страница гостя ждала бы
+# ответа от недоступного API, и /me открывалась бы по пять секунд.
 _username: str | None = None
+_asked_at: float = 0.0
+ASK_AGAIN_AFTER = 600.0
 
 
 def token() -> str:
@@ -35,23 +43,41 @@ def is_configured() -> bool:
 
 def bot_username() -> str | None:
     """@имя бота без собачки. None, если узнать не удалось."""
-    global _username
-    if _username:
-        return _username
+    global _username, _asked_at
+
     forced = os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@")
     if forced:
-        _username = forced
+        return forced
+    if _username:
         return _username
     if not token():
         return None
+    if time.time() - _asked_at < ASK_AGAIN_AFTER:
+        # Недавно спрашивали и не получилось — не заставляем гостя ждать снова.
+        return None
+
+    _asked_at = time.time()
     try:
         response = httpx.get(f"{API}/bot{token()}/getMe", timeout=TIMEOUT)
         response.raise_for_status()
         _username = response.json()["result"]["username"]
-    except Exception:
-        log.exception("не удалось узнать имя бота")
+    except Exception as err:
+        log.warning("не удалось узнать имя бота: %s", err)
         return None
     return _username
+
+
+def known_username() -> str | None:
+    """Имя бота, если оно уже известно. В сеть не ходит никогда."""
+    return os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@") or _username
+
+
+def forget_username() -> None:
+    """Забыть, что имя спрашивали. Нужно тестам."""
+    global _username, _asked_at
+
+    _username = None
+    _asked_at = 0.0
 
 
 def deep_link(join_token: str) -> str | None:

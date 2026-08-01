@@ -170,6 +170,11 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             "round_total": total,
             "scored": tasting["status"] in models.RESULT_STATUSES,
             "board": models.leaderboard(tasting_id),
+            "summary": broadcast.summary_text(
+                tasting,
+                models.leaderboard(tasting_id),
+                _public(request, f"/results/{tasting['public_code']}"),
+            ),
             "results_url": _public(request, f"/results/{tasting['public_code']}"),
             "board_url": _public(request, f"/board/{tasting['public_code']}"),
             "participants": models.list_participants(tasting_id),

@@ -165,6 +165,12 @@
     {{ participants | rejectattr('tg_chat_id') | list | length }}.{% endif %}</p>
   <p class="note">Таблица итогов — кэш, а не источник истины: пересчёт всегда
     делается из ответов заново, поэтому кнопку можно жать сколько угодно.</p>
+
+  <label for="summary">Тот же текст, чтобы отправить руками</label>
+  <textarea id="summary" rows="8" readonly onclick="this.select()">{{ summary }}</textarea>
+  <p class="note" style="margin-top:.5rem">Пригодится, если рассылка не проходит:
+    с этого сервера исходящие к api.telegram.org не идут. Нажмите на поле —
+    выделится целиком.</p>
 </section>
 {% endif %}
 

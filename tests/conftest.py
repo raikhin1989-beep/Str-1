@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, db, limits
+from app import auth, db, limits, telegram
 from app.main import app
 
 TEST_PASSWORD = "тест-пароль-админки"
@@ -19,6 +19,7 @@ def isolated_db(tmp_path, monkeypatch):
     # иначе блокировка из одного теста утекает в следующий.
     auth._failures.clear()
     limits.reset()
+    telegram.forget_username()
     yield
     db.reset_schema_cache()
 
