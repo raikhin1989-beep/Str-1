@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}{{ trouble }}{% endblock %}
+
+{% block content %}
+<h1 class="title">{{ trouble }}</h1>
+<p class="lead">Ошибка {{ code }}</p>
+
+<section class="card">
+  <p>{{ hint }}</p>
+  <p class="note"><a href="/">На главную</a></p>
+</section>
+{% endblock %}

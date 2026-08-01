@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, db
+from app import auth, db, limits
 from app.main import app
 
 TEST_PASSWORD = "тест-пароль-админки"
@@ -18,6 +18,7 @@ def isolated_db(tmp_path, monkeypatch):
     # Счётчик неудачных входов живёт в памяти процесса — чистим между тестами,
     # иначе блокировка из одного теста утекает в следующий.
     auth._failures.clear()
+    limits.reset()
     yield
     db.reset_schema_cache()
 

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from app import models, scoring, telegram
+from app import auth, limits, models, scoring, telegram
 
 log = logging.getLogger("str1.join")
 
@@ -38,10 +38,17 @@ def join_form(request: Request, code: str, error: str = ""):
 
 
 @router.post("/join/{code}")
-def join(code: str, name: str = Form("")):
+def join(request: Request, code: str, name: str = Form("")):
     tasting = models.get_tasting_by_code(code)
     if tasting is None:
         raise HTTPException(status_code=404, detail="Дегустация не найдена")
+    try:
+        limits.check("join", auth.client_ip(request))
+    except limits.TooOften:
+        return RedirectResponse(
+            f"/join/{code}?error=Слишком много записей подряд, подождите немного",
+            status_code=303,
+        )
     try:
         token = models.register_participant(tasting["id"], name)
     except ValueError as err:
@@ -121,6 +128,10 @@ def _participant_in_round(token: str):
 async def save_draft(request: Request, token: str):
     """Автосохранение черновика. Отвечает JSON — страница не перезагружается."""
     participant, round_name = _participant_in_round(token)
+    try:
+        limits.check("draft", auth.client_ip(request))
+    except limits.TooOften:
+        return JSONResponse({"ok": False, "error": "Слишком часто"}, status_code=429)
     payload = await request.json()
     try:
         models.save_round_draft(

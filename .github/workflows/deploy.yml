@@ -357,9 +357,61 @@ jobs:
             # Отступы нужны YAML-блоку выше, systemd их не понимает — срезаем.
             sed -i 's/^[[:space:]]*//' /etc/systemd/system/str-1-app.service
 
+            echo "=== ежедневный бэкап базы ==="
+            # VACUUM INTO снимает согласованную копию на живой базе: файл
+            # app.db копировать нельзя, в режиме WAL свежие записи лежат в -wal.
+            mkdir -p /var/backups/str-1
+            chown str1:str1 /var/backups/str-1
+            chmod 750 /var/backups/str-1
+
+            cat > /etc/systemd/system/str-1-backup.service <<UNIT
+            [Unit]
+            Description=Str-1 daily SQLite backup
+            After=str-1-app.service
+
+            [Service]
+            Type=oneshot
+            User=str1
+            Group=str1
+            WorkingDirectory=$APP_ROOT
+            EnvironmentFile=/etc/str-1/app.env
+            ExecStart=$APP_ROOT/venv/bin/python -m app.backup
+            NoNewPrivileges=yes
+            PrivateTmp=yes
+            ProtectSystem=full
+            ProtectHome=yes
+            ReadWritePaths=/var/lib/str-1 /var/backups/str-1
+            UNIT
+
+            cat > /etc/systemd/system/str-1-backup.timer <<UNIT
+            [Unit]
+            Description=Str-1 daily SQLite backup
+
+            [Timer]
+            OnCalendar=daily
+            # Пропущенный запуск (сервер был выключен) наверстывается.
+            Persistent=true
+            RandomizedDelaySec=15m
+
+            [Install]
+            WantedBy=timers.target
+            UNIT
+
+            sed -i 's/^[[:space:]]*//' /etc/systemd/system/str-1-backup.service
+            sed -i 's/^[[:space:]]*//' /etc/systemd/system/str-1-backup.timer
+
             systemctl daemon-reload
             systemctl enable str-1-app >/dev/null 2>&1 || true
             systemctl restart str-1-app
+            systemctl enable --now str-1-backup.timer >/dev/null 2>&1 || true
+
+            # Первый бэкап делаем сразу: иначе до полуночи копии не существует,
+            # а проверять её работоспособность лучше сейчас, а не в аварии.
+            if systemctl start str-1-backup; then
+              echo "бэкапы: $(ls -1 /var/backups/str-1/app-*.db.gz 2>/dev/null | wc -l) шт."
+            else
+              echo "::warning::бэкап не отработал — смотри journalctl -u str-1-backup"
+            fi
 
             echo "=== ждём приложение на 127.0.0.1:$APP_PORT ==="
             app_ok=""
@@ -481,6 +533,16 @@ jobs:
             # Проверяем не только что Caddy жив, но и что проксирование настроено:
             # этот путь обслуживает уже приложение, а не файлы.
             echo "api:     $(curl -fsS http://127.0.0.1:$SITE_PORT/api/health)"
+            # /api/health отвечает, даже когда шаблоны или база сломаны: он
+            # ничего не рендерит. Поэтому дополнительно дёргаем живую страницу
+            # со справочником — она ходит в базу и рисует шаблон.
+            if curl -fsS -o /dev/null "http://127.0.0.1:$SITE_PORT/whisky"; then
+              echo "страница:  OK (шаблоны и база отвечают)"
+            else
+              echo "::error::/whisky не отдаётся — шаблон или база сломаны"
+              journalctl -u str-1-app --no-pager -n 40 || true
+              exit 1
+            fi
 
             # Домен и TLS обслуживает ОСНОВНОЙ Caddy: порты 80/443 заняты им, а
             # два процесса один порт не поделят. Сам /etc/caddy/Caddyfile мы не

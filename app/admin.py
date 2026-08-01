@@ -1,13 +1,17 @@
 """Админка: вход, дегустации, справочник виски."""
 
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.background import BackgroundTask
 
-from app import ai, auth, broadcast, models
+from app import ai, auth, backup, broadcast, models
 from app.config import admin_password
+from app.db import connect, log_action
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
@@ -24,6 +28,16 @@ def _redirect(url: str) -> RedirectResponse:
     # 303: после POST браузер должен перейти на страницу методом GET,
     # иначе обновление страницы повторит действие.
     return RedirectResponse(url, status_code=303)
+
+
+def _note(request: Request, action: str, details: str = "") -> None:
+    """Записать действие админа в журнал.
+
+    Нужно ровно для одного разговора: «а кто закрыл раунд?» — вечером
+    за столом это выясняется быстрее, чем по памяти.
+    """
+    with connect() as conn:
+        log_action(conn, auth.client_ip(request), action, details)
 
 
 # ── вход ───────────────────────────────────────────────────────────────────
@@ -181,7 +195,7 @@ def update_tasting(
 
 
 @router.post("/tastings/{tasting_id}/status", dependencies=[Depends(require_admin)])
-def change_status(tasting_id: int, status: str = Form(...)):
+def change_status(request: Request, tasting_id: int, status: str = Form(...)):
     try:
         models.set_status(tasting_id, status)
     except ValueError as err:
@@ -190,7 +204,31 @@ def change_status(tasting_id: int, status: str = Form(...)):
     # нажатием «пересчитать» страница итогов стояла бы пустой.
     if status in models.RESULT_STATUSES:
         models.compute_results(tasting_id)
+    _note(request, "tasting.status", f"дегустация {tasting_id} → {status}")
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Статус изменён")
+
+
+@router.get("/backup", dependencies=[Depends(require_admin)])
+def download_backup(request: Request):
+    """Скачать свежую копию базы.
+
+    Копия снимается прямо сейчас и во временный файл, а не берётся из
+    /var/backups: скачивают её обычно как раз тогда, когда нужен слепок
+    на эту минуту, а не вчерашний.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    target = Path(tempfile.gettempdir()) / f"str-1-{stamp}.db"
+    backup.snapshot(target)
+    with connect() as conn:
+        log_action(conn, auth.client_ip(request), "admin.backup", target.name)
+    return FileResponse(
+        target,
+        media_type="application/octet-stream",
+        filename=f"str-1-{stamp}.db",
+        # Файл удаляем после отдачи: во временном каталоге копия базы
+        # со всеми ответами участников залёживаться не должна.
+        background=BackgroundTask(target.unlink),
+    )
 
 
 @router.post("/tastings/{tasting_id}/broadcast", dependencies=[Depends(require_admin)])
@@ -209,16 +247,18 @@ def send_results(request: Request, tasting_id: int):
     for label, key in (("уже было", "skipped"), ("без телеграма", "unlinked"), ("не дошло", "failed")):
         if report[key]:
             parts.append(f"{label}: {', '.join(report[key])}")
+    _note(request, "tasting.broadcast", f"дегустация {tasting_id}: {'; '.join(parts)}")
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Рассылка — {'; '.join(parts)}")
 
 
 @router.post("/tastings/{tasting_id}/recount", dependencies=[Depends(require_admin)])
-def recount(tasting_id: int):
+def recount(request: Request, tasting_id: int):
     """Пересчитать итоги. Таблица — кэш, поэтому жать можно сколько угодно."""
     tasting = models.get_tasting(tasting_id)
     if tasting is None or tasting["status"] not in models.RESULT_STATUSES:
         return _redirect(f"/admin/tastings/{tasting_id}?error=Сначала подведите итоги")
     models.compute_results(tasting_id)
+    _note(request, "tasting.recount", f"дегустация {tasting_id}")
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Пересчитано")
 
 
@@ -241,9 +281,10 @@ def remove_sample(tasting_id: int, whisky_id: int):
 
 
 @router.post("/tastings/{tasting_id}/shuffle", dependencies=[Depends(require_admin)])
-def shuffle(tasting_id: int):
+def shuffle(request: Request, tasting_id: int):
     try:
         models.shuffle_samples(tasting_id)
+        _note(request, "tasting.shuffle", f"дегустация {tasting_id}")
     except ValueError as err:
         return _redirect(f"/admin/tastings/{tasting_id}?error={err}")
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Номера перемешаны")

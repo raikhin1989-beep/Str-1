@@ -19,7 +19,7 @@ DuckDNS: API умеет только обновлять IP у уже сущес�
 | --- | --- | --- |
 | Докрут статики | `/var/www/html` | `/var/www/str-1` |
 | Конфиг веб-сервера | `/etc/caddy/Caddyfile` | `/etc/caddy/str-1.caddyfile` + `/etc/caddy/sites.d/str-1.caddy` |
-| Службы | `caddy.service` | `str-1-site.service`, `str-1-app.service` |
+| Службы | `caddy.service` | `str-1-site.service`, `str-1-app.service`, `str-1-backup.timer` |
 | Порты | 80, 443 | 8081 (наружу), 8082 (только localhost) |
 | Код приложения | — | `/opt/str-1/app`, venv `/opt/str-1/venv` |
 | База | — | `/var/lib/str-1/app.db` |
@@ -76,6 +76,8 @@ app/                 → /opt/str-1/app
   ai.py              запросы к Anthropic API и кэш       (шаг 4)
   telegram.py        бот: привязка участников и отправка сообщений
   broadcast.py       рассылка итогов, отметки о доставке
+  backup.py          копии базы: VACUUM INTO, ротация 14 дней
+  limits.py          ограничение частоты на публичных формах
   join.py            регистрация, личная страница, раунды, итоги, экран, вебхук, QR
   migrations/        нумерованные .sql, применяются по порядку
   templates/         Jinja2, админка — в templates/admin/
