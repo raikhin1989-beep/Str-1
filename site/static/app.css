@@ -290,3 +290,11 @@ input[type="range"] { padding: 0; border: 0; background: transparent; accent-col
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* Поле со ссылкой в таблице: длинный адрес не должен растягивать колонку. */
+.link-cell {
+  width: 22rem;
+  max-width: 55vw;
+  padding: .3rem .4rem;
+  font-size: .85rem;
+}

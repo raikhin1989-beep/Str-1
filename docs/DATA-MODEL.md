@@ -64,6 +64,7 @@ SQLite, файл `/var/lib/str-1/app.db`, режим WAL. Схема созда�
 | `name` | text | |
 | `join_token` | text unique | в ссылке участника и в deep link телеграма |
 | `tg_chat_id` | int | заполняется после нажатия Start у бота |
+| `contact` | text | Куда прислать ссылку: телеграм, телефон, почта — свободный текст. Не проверяется: нужен ведущему, а не приложению |
 | `tg_username` | text | справочно |
 | `created_at` | datetime | |
 

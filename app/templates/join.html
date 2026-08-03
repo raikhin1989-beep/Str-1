@@ -9,12 +9,29 @@
 
 {% if error %}<p class="msg msg-bad">{{ error }}</p>{% endif %}
 
+{% if known %}
+<section class="card">
+  <h2>Вы уже записаны</h2>
+  <p>Этот телефон помнит вашу страницу — <strong>{{ known.name }}</strong>.</p>
+  <p><a href="/me/{{ known_token }}">Открыть свою страницу →</a></p>
+  <p class="note" style="margin-top:.5rem">Если это не вы, запишитесь ниже —
+    у каждого участника своя ссылка.</p>
+</section>
+{% endif %}
+
 {% if open %}
 <form method="post" action="/join/{{ tasting.public_code }}" class="card form">
   <h2>Записаться</h2>
   <label for="name">Как вас записать</label>
   <input id="name" name="name" required maxlength="60" autocomplete="name"
-         placeholder="Имя, которое увидят за столом" autofocus>
+         placeholder="Имя, которое увидят за столом" {% if not known %}autofocus{% endif %}>
+
+  <label for="contact">Куда прислать ссылку <span class="hint">(необязательно)</span></label>
+  <input id="contact" name="contact" maxlength="120"
+         placeholder="@ник в телеграме, телефон или почта">
+  <p class="note" style="margin:.3rem 0 0">Личная ссылка — единственный вход на
+    вашу страницу. Оставьте контакт, и ведущий пришлёт её, если потеряется.</p>
+
   <button type="submit">Участвую</button>
 </form>
 <p class="note">После этого будет один шаг: привязать телеграм, чтобы прислать вам итоги.</p>

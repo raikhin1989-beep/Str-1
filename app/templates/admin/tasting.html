@@ -94,16 +94,25 @@
 
   {% if participants %}
   <table class="grid">
-    <thead><tr><th>Имя</th><th>Телеграм</th></tr></thead>
+    <thead><tr><th>Имя</th><th>Куда прислать</th><th>Телеграм</th><th>Личная ссылка</th></tr></thead>
     <tbody>
       {% for p in participants %}
       <tr>
         <td>{{ p.name }}</td>
+        <td>{{ p.contact or "—" }}</td>
         <td>{% if p.tg_chat_id %}привязан{% if p.tg_username %} (@{{ p.tg_username }}){% endif %}{% else %}—{% endif %}</td>
+        <td>
+          <input class="link-cell" readonly onclick="this.select()" value="{{ me_urls[p.id] }}">
+          <a href="/qr.svg?data={{ me_urls[p.id] | urlencode }}" target="_blank" rel="noopener">QR</a>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  <p class="note">Гость потерял ссылку — возьмите её отсюда: нажмите на поле,
+    выделится целиком. «QR» открывает код на весь экран, его можно показать
+    с телефона. Ссылка — это пропуск на чужую страницу, поэтому чужую
+    не показывайте.</p>
   <p class="note">Кому итоги в телеграм не придут: {{ participants | rejectattr('tg_chat_id') | list | length }}.</p>
   {% else %}
   <p class="note">Пока никто не записался.</p>

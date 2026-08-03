@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import ai, telegram
 from app.admin import router as admin_router
 from app.config import admin_password
+from app import join as join_module
 from app.join import router as join_router
 from app.outbox import router as outbox_router
 from app.public import router as public_router
@@ -69,7 +70,14 @@ def health() -> dict:
 
 @app.get("/")
 def index(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    # Если этот телефон уже открывал личную страницу — первым делом дать
+    # на неё ссылку: потерянная ссылка оказалась самой частой бедой гостя.
+    known = join_module.remembered(request)
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {"known": known[0] if known else None, "known_token": known[1] if known else None},
+    )
 
 
 # ── страницы ошибок ────────────────────────────────────────────────────────

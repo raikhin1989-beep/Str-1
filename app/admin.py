@@ -178,6 +178,12 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             "results_url": _public(request, f"/results/{tasting['public_code']}"),
             "board_url": _public(request, f"/board/{tasting['public_code']}"),
             "participants": models.list_participants(tasting_id),
+            # Личные ссылки гостей: ссылку теряют чаще всего, и восстановить
+            # её должен уметь ведущий, а не тот, кто ходит в базу.
+            "me_urls": {
+                person["id"]: _public(request, f"/me/{person['join_token']}")
+                for person in models.list_participants(tasting_id)
+            },
             "join_url": join_url,
             "samples": in_tasting,
             "catalogue": [w for w in models.list_whiskies() if w["id"] not in chosen],

@@ -306,17 +306,24 @@ def get_participant_by_token(token: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def register_participant(tasting_id: int, name: str) -> str:
+MAX_CONTACT_LENGTH = 120
+
+
+def register_participant(tasting_id: int, name: str, contact: str = "") -> str:
     """Записать гостя и вернуть его личный токен.
 
     Токен — и адрес личной страницы, и полезная нагрузка deep link'а телеграма,
     по которой бот понимает, кого привязывает.
+
+    Контакт необязательный и никак не проверяется: он нужен ведущему, чтобы
+    было куда переслать личную ссылку, если гость её потеряет.
     """
     clean = " ".join(name.split())
     if not clean:
         raise ValueError("нужно имя")
     if len(clean) > 60:
         raise ValueError("имя слишком длинное")
+    contact = " ".join(contact.split())[:MAX_CONTACT_LENGTH]
 
     tasting = get_tasting(tasting_id)
     if tasting is None:
@@ -327,8 +334,9 @@ def register_participant(tasting_id: int, name: str) -> str:
     token = secrets.token_urlsafe(16)
     with connect() as conn:
         conn.execute(
-            "INSERT INTO participant (tasting_id, name, join_token) VALUES (?, ?, ?)",
-            (tasting_id, clean, token),
+            "INSERT INTO participant (tasting_id, name, join_token, contact)"
+            " VALUES (?, ?, ?, ?)",
+            (tasting_id, clean, token, contact or None),
         )
     return token
 

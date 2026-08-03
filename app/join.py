@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app import auth, limits, models, scoring, telegram
+from app.config import public_base_url
 
 log = logging.getLogger("str1.join")
 
@@ -25,6 +26,7 @@ def join_form(request: Request, code: str, error: str = ""):
     tasting = models.get_tasting_by_code(code)
     if tasting is None:
         raise HTTPException(status_code=404, detail="Дегустация не найдена")
+    known = remembered(request)
     return templates.TemplateResponse(
         request,
         "join.html",
@@ -33,12 +35,16 @@ def join_form(request: Request, code: str, error: str = ""):
             "open": tasting["status"] == "registration",
             "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
             "error": error,
+            # Тот же телефон уже открывал чью-то личную страницу — предложим
+            # вернуться на неё, а не заводить второго участника с тем же именем.
+            "known": known[0] if known else None,
+            "known_token": known[1] if known else None,
         },
     )
 
 
 @router.post("/join/{code}")
-def join(request: Request, code: str, name: str = Form("")):
+def join(request: Request, code: str, name: str = Form(""), contact: str = Form("")):
     tasting = models.get_tasting_by_code(code)
     if tasting is None:
         raise HTTPException(status_code=404, detail="Дегустация не найдена")
@@ -50,10 +56,40 @@ def join(request: Request, code: str, name: str = Form("")):
             status_code=303,
         )
     try:
-        token = models.register_participant(tasting["id"], name)
+        token = models.register_participant(tasting["id"], name, contact)
     except ValueError as err:
         return RedirectResponse(f"/join/{code}?error={err}", status_code=303)
-    return RedirectResponse(f"/me/{token}", status_code=303)
+    return _remember(RedirectResponse(f"/me/{token}", status_code=303), request, token)
+
+
+# Личная ссылка — единственный вход на свою страницу, и теряют её постоянно.
+# Кладём токен в куку: тот же телефон найдёт свою страницу сам, даже если
+# вкладка закрылась. Кука httponly — читать её из JS незачем, а вот утечь
+# через чужой скрипт она не должна: это фактически пропуск.
+ME_COOKIE = "str1_me"
+ME_COOKIE_DAYS = 30
+
+
+def _remember(response, request: Request, token: str):
+    response.set_cookie(
+        ME_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=auth.is_secure_request(request),
+        max_age=60 * 60 * 24 * ME_COOKIE_DAYS,
+        path="/",
+    )
+    return response
+
+
+def remembered(request: Request):
+    """Участник, чью страницу этот телефон открывал. None, если такого нет."""
+    token = request.cookies.get(ME_COOKIE)
+    if not token:
+        return None
+    participant = models.get_participant_by_token(token)
+    return (participant, token) if participant else None
 
 
 @router.get("/me/{token}")
@@ -71,6 +107,7 @@ def participant_page(request: Request, token: str, error: str = ""):
         "deep_link": telegram.deep_link(token),
         "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
         "token": token,
+        "my_url": _public_url(request, f"/me/{token}"),
         "round": round_name,
         "error": error,
     }
@@ -98,7 +135,12 @@ def participant_page(request: Request, token: str, error: str = ""):
             "tags": {no: _tags_for(row, round_name) for no, row in ratings.items()},
             "submitted": models.round_submitted(participant["id"], round_name),
         }
-    return templates.TemplateResponse(request, "me.html", context)
+    return _remember(templates.TemplateResponse(request, "me.html", context), request, token)
+
+
+def _public_url(request: Request, path: str) -> str:
+    """Адрес для показа гостю: домен важнее того, откуда открыта страница."""
+    return (public_base_url() or str(request.base_url).rstrip("/")) + path
 
 
 def _tags_for(rating, round_name: str) -> str:
