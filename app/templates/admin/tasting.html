@@ -165,17 +165,17 @@
   <h2>Итоги</h2>
   {% if board %}
   <table class="grid">
-    <thead><tr><th>Место</th><th>Кто</th><th>Нос</th><th>Вкус</th><th>Класс</th><th>Бонусы</th><th>Итого</th></tr></thead>
+    <thead><tr><th>№</th><th>Кто</th><th>Итого</th><th>Нос</th><th>Вкус</th><th>Класс</th><th>Бонус</th></tr></thead>
     <tbody>
       {% for row in board %}
       <tr>
         <td class="num">{{ row.place }}</td>
         <td>{{ row.name }}</td>
+        <td class="num"><strong>{{ row.total }}</strong></td>
         <td class="num">{{ row.points_nose }}</td>
         <td class="num">{{ row.points_palate }}</td>
         <td class="num">{{ row.points_partial }}</td>
         <td class="num">{{ row.points_bonus }}</td>
-        <td class="num"><strong>{{ row.total }}</strong></td>
       </tr>
       {% endfor %}
     </tbody>

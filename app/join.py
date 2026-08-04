@@ -241,7 +241,10 @@ async def save_draft(request: Request, token: str):
     """Автосохранение черновика. Отвечает JSON — страница не перезагружается."""
     participant, round_name = _participant_in_round(token)
     try:
-        limits.check("draft", auth.client_ip(request))
+        # По личной ссылке, а не по адресу: за одним роутером сидит весь стол,
+        # и счёт по адресу останавливал сохранение сразу всем — у кого раньше
+        # кончилась квота, тот и виноват. Токен — это ровно один гость.
+        limits.check("draft", token)
     except limits.TooOften:
         return JSONResponse({"ok": False, "error": "Слишком часто"}, status_code=429)
     payload = await request.json()

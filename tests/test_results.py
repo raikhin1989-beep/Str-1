@@ -192,3 +192,34 @@ def test_moving_to_scoring_counts_right_away(admin, played):
         follow_redirects=True,
     )
     assert models.leaderboard(played["id"]), "итоги должны посчитаться сами"
+
+
+def _headers(html: str) -> list[str]:
+    import re
+    head = html[html.index("<thead>") : html.index("</thead>")]
+    return re.findall(r"<th>([^<]*)</th>", head)
+
+
+def test_the_total_comes_right_after_the_name(client, played):
+    """Главное число таблицы. На телефоне столбцы справа уезжают за край,
+    и «Итого» уезжало первым — то есть ровно то, ради чего её открывают."""
+    _publish(played["id"])
+    code = models.get_tasting(played["id"])["public_code"]
+    columns = _headers(client.get(f"/results/{code}").text)
+    assert columns[:3] == ["№", "Кто", "Итого"], columns
+
+
+def test_the_projector_builds_cells_in_the_same_order_as_its_headers():
+    """Заголовки в шаблоне, значения в скрипте — разъехаться им ничего
+    не мешает, кроме внимания. Проверяем, что не разъехались."""
+    from pathlib import Path
+
+    template = Path("app/templates/board.html").read_text(encoding="utf-8")
+    script = Path("site/static/board.js").read_text(encoding="utf-8")
+
+    headers = _headers(template)
+    order = ["place", "name", "total", "nose", "palate", "partial", "bonus"]
+    cells = [key for key in order if f"row.{key}" in script]
+    positions = sorted(cells, key=lambda key: script.index(f"row.{key}"))
+    assert len(headers) == len(positions) == 7
+    assert positions == order, positions

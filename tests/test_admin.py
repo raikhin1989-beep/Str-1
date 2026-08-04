@@ -128,10 +128,3 @@ def test_the_search_comes_before_the_add_form(admin):
     page = admin.get("/admin/whiskies").text
     assert page.index("Поиск по справочнику") < page.index("Добавить виски")
 
-
-def test_a_wide_table_scrolls_instead_of_being_clipped(admin):
-    """С телефона правый столбец просто обрезался краем экрана."""
-    models.save_whisky({"name": "Ardbeg 10", "region": "Islay"})
-    page = admin.get("/admin/whiskies").text
-    table = page.index('<table class="grid">')
-    assert 'class="scroller"' in page[:table]

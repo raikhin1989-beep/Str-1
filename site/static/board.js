@@ -26,15 +26,19 @@
     body.textContent = '';
     data.rows.forEach(function (row) {
       var tr = document.createElement('tr');
+      // Порядок обязан совпадать с <thead> в board.html: заголовки там,
+      // значения здесь, и разъехаться им ничего не мешает, кроме внимания.
+      // Итого — сразу после имени: это главное число таблицы, и на телефоне
+      // оно единственное, что обязано попасть на экран.
       [
-        ['num', row.place], [null, row.name], ['num', row.nose], ['num', row.palate],
-        ['num', row.partial], ['num', row.bonus], ['num', row.total]
+        ['num', row.place], [null, row.name], ['num', row.total], ['num', row.nose],
+        ['num', row.palate], ['num', row.partial], ['num', row.bonus]
       ].forEach(function (pair, index) {
         var td = document.createElement('td');
         if (pair[0]) td.className = pair[0];
         // Через textContent, а не innerHTML: имя участника пишет он сам.
         text(td, pair[1]);
-        if (index === 6) td.innerHTML = '<strong>' + td.textContent + '</strong>';
+        if (index === 2) td.innerHTML = '<strong>' + td.textContent + '</strong>';
         tr.appendChild(td);
       });
       body.appendChild(tr);

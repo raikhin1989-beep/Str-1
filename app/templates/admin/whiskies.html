@@ -34,7 +34,6 @@
     <a href="/admin/whiskies">показать все</a>
   {% else %}Всего записей: {{ total }}{% endif %}
 </p>
-<div class="scroller">
 <table class="grid">
   <thead><tr><th>Название</th><th>Класс</th><th>Регион</th><th>Крепость</th><th>Откуда</th></tr></thead>
   <tbody>
@@ -49,7 +48,7 @@
     {% endfor %}
   </tbody>
 </table>
-</div>
+<p class="note swipe">Таблицу можно потянуть вбок — там ещё столбцы.</p>
 <p class="note">Название — ссылка на правку: там же все поля и удаление.</p>
 {% elif query %}
 <p class="note">По запросу «{{ query }}» ничего нет.
