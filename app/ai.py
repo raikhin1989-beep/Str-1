@@ -343,8 +343,11 @@ def _photo_failure(problems: list[str]) -> str:
     # в консоли Yandex Cloud, поэтому говорим об этом прямо.
     if any("403" in problem for problem in problems if problem.startswith("чтение этикетки")):
         parts.append(
-            "Чтение этикетки (Yandex Vision OCR) отвечает «нет доступа»: "
-            "сервисному аккаунту нужна роль ai.vision.user, а ключу — право её использовать."
+            "Чтение этикетки (Yandex Vision OCR) отвечает «нет доступа». "
+            "Причин ровно две, и нужны обе: сервисному аккаунту — роль "
+            "ai.vision.user на каталог, API-ключу — область действия "
+            "yc.ai.vision.execute. Область задаётся при создании ключа и "
+            "не меняется: если она другая, ключ выпускается заново."
         )
     parts.append("Подробности: " + "; ".join(problems) + ".")
     return " ".join(parts)[:700]
