@@ -64,6 +64,30 @@ def test_photo_is_cached_by_content(fake_model):
     assert len(fake_model) == 1
 
 
+def test_a_failure_is_not_remembered(monkeypatch, fake_model):
+    """Пойманное на живом сайте: фотографию принесли, когда прав на чтение
+    этикетки не было, отказ осел в кэше — и после починки прав та же самая
+    фотография продолжала получать старый ответ мимо модели."""
+    failure = dict(CARD, recognized=False, comment="Фотография не приложена.")
+    monkeypatch.setattr(ai, "_ask", lambda prompt, image=None: failure)
+    assert ai.lookup_by_photo(b"\xff\xd8bottle", "image/jpeg")["recognized"] is False
+
+    # Права починили — та же фотография должна дойти до модели, а не до кэша.
+    monkeypatch.setattr(ai, "_ask", lambda prompt, image=None: CARD)
+    assert ai.lookup_by_photo(b"\xff\xd8bottle", "image/jpeg")["recognized"] is True
+
+
+def test_a_failed_name_lookup_is_not_remembered_either(monkeypatch, fake_model):
+    failure = dict(CARD, recognized=False, comment="Не понял, о чём речь.")
+    monkeypatch.setattr(ai, "_ask", lambda prompt, image=None: failure)
+    ai.lookup_by_name("что-то невнятное")
+
+    seen = []
+    monkeypatch.setattr(ai, "_ask", lambda prompt, image=None: seen.append(prompt) or CARD)
+    ai.lookup_by_name("что-то невнятное")
+    assert seen, "повтор должен был дойти до модели"
+
+
 def test_photo_rejects_wrong_format(fake_model):
     with pytest.raises(ai.AiUnavailable):
         ai.lookup_by_photo(b"data", "application/pdf")
