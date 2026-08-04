@@ -1,6 +1,7 @@
 """Выбор провайдера распознавания и разбор ответа Яндекса."""
 
 import json
+import time
 
 import pytest
 
@@ -64,6 +65,66 @@ def test_yandex_hides_photo_until_it_is_allowed(client, monkeypatch):
     monkeypatch.setenv("AI_PHOTO", "on")
     assert ai.supports_images() is True
     assert "Сфотографируйте этикетку" in client.get("/whisky", params={"q": "нет такого"}).text
+
+
+def test_photo_appears_by_itself_once_ocr_answers(client, monkeypatch):
+    """Ради этого проверка и делается: права выдали в чужой консоли, а кнопка
+    появилась сама — без секрета, без выката и без нашего участия."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
+    assert "Сфотографируйте этикетку" not in client.get("/whisky", params={"q": "х"}).text
+
+    monkeypatch.setattr(ai, "_ask_ocr_whether_we_may", lambda: True)
+    ai._probe_ocr()
+    assert ai.supports_images() is True
+    assert "Сфотографируйте этикетку" in client.get("/whisky", params={"q": "х"}).text
+
+
+def test_the_switch_beats_the_probe_both_ways(monkeypatch):
+    """Иногда нужно увидеть настоящую ошибку, а иногда — спрятать рабочую кнопку."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
+
+    monkeypatch.setenv("AI_PHOTO", "on")
+    assert ai.supports_images() is True, "включено вручную вопреки отказу OCR"
+
+    monkeypatch.setattr(ai, "_ask_ocr_whether_we_may", lambda: True)
+    ai._probe_ocr()
+    monkeypatch.setenv("AI_PHOTO", "off")
+    assert ai.supports_images() is False, "выключено вручную вопреки разрешению"
+
+
+def test_asking_ocr_never_delays_the_page(monkeypatch):
+    """Проверка уходит в фон. /api/health однажды уже вис на подобном вопросе,
+    заданном по дороге, — этого больше не должно случиться."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
+
+    def sleeping() -> bool:
+        time.sleep(3)
+        return True
+
+    monkeypatch.setattr(ai, "_ask_ocr_whether_we_may", sleeping)
+    started = time.monotonic()
+    assert ai.ocr_allowed() is False, "пока ответа нет, кнопки нет"
+    assert time.monotonic() - started < 0.5, "ответ должен быть мгновенным"
+
+
+def test_a_refusal_is_rechecked_sooner_than_a_permission(monkeypatch):
+    """Роль выдают в консоли, и кнопка должна появиться сама — значит отказ
+    протухает быстро. Разрешение перепроверять так же часто незачем."""
+    assert ai.OCR_PROBE_FAIL_SECONDS < ai.OCR_PROBE_OK_SECONDS
+
+
+def test_without_a_yandex_key_nobody_is_asked(monkeypatch):
+    """Спрашивать OCR не о чем и нечем: запроса быть не должно."""
+    monkeypatch.delenv("YANDEX_API_KEY", raising=False)
+
+    def explode() -> bool:
+        raise AssertionError("к OCR постучались без ключа")
+
+    monkeypatch.setattr(ai, "_ask_ocr_whether_we_may", explode)
+    assert ai.ocr_allowed() is False
 
 
 def test_anthropic_takes_photos_without_a_switch(monkeypatch):
@@ -339,3 +400,60 @@ def test_parse_card_fills_missing_fields():
 def test_parse_card_rejects_gibberish():
     with pytest.raises(ai.AiUnavailable):
         ai._parse_card("извините, не понял")
+
+
+# Настоящая проверка прав, пойманная до того, как conftest подменит её заглушкой.
+ASK_OCR = ai._ask_ocr_whether_we_may
+
+
+@pytest.mark.parametrize(
+    "status, allowed",
+    [
+        (200, True),    # прочитал (на картинке 1×1 читать нечего — это нормально)
+        (400, True),    # запрос не понравился, но до нас дошли и пустили
+        (401, False),   # ключ не тот
+        (403, False),   # роли или области действия нет
+        (500, False),   # сервису плохо — обещать гостю нечего
+    ],
+)
+def test_ocr_permission_is_read_from_the_status(monkeypatch, status, allowed):
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr("httpx.post", lambda *a, **kw: _Response(status, {}))
+    assert ASK_OCR() is allowed
+
+
+def test_a_network_failure_is_not_taken_as_permission(monkeypatch):
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+
+    def boom(*a, **kw):
+        raise OSError("сеть недоступна")
+
+    monkeypatch.setattr("httpx.post", boom)
+    assert ASK_OCR() is False
+
+
+def test_the_probe_sends_a_real_jpeg(monkeypatch):
+    """Смысл целой картинки вместо мусора: на битом теле сервис может ответить
+    400 ещё до проверки ключа, и «400» перестало бы значить «нам можно»."""
+    import base64
+    import struct
+
+    raw = base64.b64decode(ai.OCR_PROBE_JPEG)
+    assert raw[:2] == b"\xff\xd8" and raw[-2:] == b"\xff\xd9"
+    start = raw.find(b"\xff\xc0")
+    height, width = struct.unpack(">HH", raw[start + 5 : start + 9])
+    assert (width, height) == (1, 1), "картинка должна быть крошечной: её шлют часто"
+
+    sent = {}
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(
+        "httpx.post",
+        lambda url, **kw: sent.update(url=url, json=kw["json"]) or _Response(200, {}),
+    )
+    ASK_OCR()
+    assert sent["url"] == ai.YANDEX_OCR_URL
+    assert sent["json"]["mimeType"] == "JPEG"
+    assert sent["json"]["content"] == ai.OCR_PROBE_JPEG

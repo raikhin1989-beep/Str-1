@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, db, limits, telegram
+from app import ai, auth, db, limits, telegram
 from app.main import app
 
 TEST_PASSWORD = "тест-пароль-админки"
@@ -20,7 +20,15 @@ def isolated_db(tmp_path, monkeypatch):
     auth._failures.clear()
     limits.reset()
     telegram.forget_username()
+    # Права на Vision OCR приложение выясняет у самого Яндекса. В тестах
+    # ходить туда нельзя ни при каких обстоятельствах: это чужой сервис,
+    # он платный и его может не быть. Заглушка отвечает «не пускают» —
+    # тесту, которому нужно обратное, заглушку подменяют своей.
+    ai.reset_ocr_cache()
+    ai.reset_models_cache()
+    monkeypatch.setattr(ai, "_ask_ocr_whether_we_may", lambda: False)
     yield
+    ai.reset_ocr_cache()
     db.reset_schema_cache()
 
 

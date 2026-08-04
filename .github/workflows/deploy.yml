@@ -341,8 +341,10 @@ jobs:
               printf 'AI_PROVIDER=%s\n' "$AI_PROVIDER" >> /etc/str-1/app.env
               echo "AI_PROVIDER: $AI_PROVIDER (выбор провайдера задан явно)"
             fi
-            # Загрузка фото у Яндекса выключена по умолчанию: она упирается
-            # в роль ai.vision.user, а не в код (docs/PLAN.md, шаг 4).
+            # Показывать ли загрузку фото, сайт решает сам: спрашивает у
+            # Vision OCR, пускает ли тот его. Этот секрет — ручное
+            # переопределение на случай, когда решение надо продавить
+            # (docs/RUNBOOK.md, «Фото этикетки не распознаётся»).
             if [ -n "$AI_PHOTO" ]; then
               printf 'AI_PHOTO=%s\n' "$AI_PHOTO" >> /etc/str-1/app.env
               echo "AI_PHOTO: $AI_PHOTO (распознавание по фотографии задано явно)"

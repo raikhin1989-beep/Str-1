@@ -6,6 +6,7 @@
 """
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -26,6 +27,21 @@ log = logging.getLogger("str1.app")
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Спросить у Vision OCR, пускает ли он нас, — пока никто не пришёл.
+
+    Сама проверка уходит в фон и запрос не задерживает, но без этого первый
+    гость после перезапуска увидел бы страницу поиска без кнопки «по
+    фотографии»: ответа ещё нет, а обещать распознавание вслепую нельзя.
+    Здесь же ответ успевает получить деплой — он читает /api/health сразу
+    после старта и по нему проверяет, что доехало.
+    """
+    ai.ocr_allowed()
+    yield
+
+
 # Схему OpenAPI и интерактивную документацию не публикуем: это не публичное API,
 # а сайт для гостей дегустации.
 app = FastAPI(
@@ -33,6 +49,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    lifespan=lifespan,
 )
 
 

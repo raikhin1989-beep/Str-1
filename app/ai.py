@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 
 from app.config import ai_provider, anthropic_key, photo_lookup, yandex_folder, yandex_key
@@ -137,10 +138,25 @@ def provider() -> str | None:
 def supports_images() -> bool:
     """Предлагать ли гостю загрузить фотографию.
 
-    Код для фото готов у обоих провайдеров; включён он там, где реально
-    работает — см. config.photo_lookup().
+    Код для фото готов у обоих провайдеров, а вот работает он не везде, и
+    зависит это от прав в чужой консоли, а не от нашего кода. Поэтому кнопку
+    показываем не по догадке, а по факту: у Яндекса спрашиваем сам Vision OCR,
+    отвечает ли он нам (ocr_allowed). У Anthropic картинку понимает сама
+    модель — там спрашивать нечего.
+
+    Ручное переопределение AI_PHOTO сильнее любой проверки: `off` прячет
+    кнопку и там, где всё работает, `on` показывает вопреки отказу — иногда
+    надо увидеть настоящую ошибку, а не спрятанную кнопку.
     """
-    return ai_provider() is not None and photo_lookup()
+    current = ai_provider()
+    if current is None:
+        return False
+    override = photo_lookup()
+    if override is not None:
+        return override
+    if current == "anthropic":
+        return True
+    return ocr_allowed()
 
 
 def check_rate_limit(ip: str) -> None:
@@ -604,6 +620,121 @@ def reset_models_cache() -> None:
     global _models_cache
 
     _models_cache = None
+
+
+# ── доступен ли нам Vision OCR ──────────────────────────────────────────────
+#
+# Права на чтение этикетки живут в чужой консоли и меняются без нашего ведома:
+# роль выдали — заработало, ключ перевыпустили с другой областью — отвалилось.
+# Раньше это отражал секрет AI_PHOTO, который ставили руками и проверяли
+# выкатом. Теперь спрашиваем у самого OCR.
+#
+# Настоящая картинка 1×1, а не мусор: на битом теле сервис может ответить 400
+# ещё до проверки ключа, и тогда «400» означало бы не «нам можно», а «мы даже
+# не дошли до авторизации». На корректном запросе ответ однозначен.
+OCR_PROBE_JPEG = (
+    "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof"
+    "Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAAB"
+    "AAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q=="
+)
+# Разрешение держим дольше отказа: отказ хочется перепроверять часто — роль
+# выдали в консоли, и кнопка должна появиться сама, без выката.
+OCR_PROBE_OK_SECONDS = 3600
+OCR_PROBE_FAIL_SECONDS = 300
+
+_ocr_cache: tuple[float, bool] | None = None
+_ocr_lock = threading.Lock()
+_ocr_probing = False
+
+
+def ocr_allowed() -> bool:
+    """Отвечает ли нам Vision OCR. Не ходит в сеть на этом вызове.
+
+    Вызывается при отрисовке страницы поиска, поэтому обязана быть мгновенной:
+    /api/health уже однажды повис на двадцать секунд из-за похожего вопроса,
+    заданного по дороге. Ответ берётся из памяти, а обновляется фоном.
+
+    Пока ответа нет, кнопки нет: обещать гостю распознавание, о котором мы
+    ничего не знаем, хуже, чем не показать её первые пару секунд после
+    перезапуска.
+    """
+    if yandex_key() is None:
+        return False
+    cached = _ocr_cache
+    if cached is not None:
+        age = time.time() - cached[0]
+        if age < (OCR_PROBE_OK_SECONDS if cached[1] else OCR_PROBE_FAIL_SECONDS):
+            return cached[1]
+    _probe_ocr_in_background()
+    return cached[1] if cached is not None else False
+
+
+def _probe_ocr_in_background() -> None:
+    """Обновить ответ, не задерживая текущий запрос."""
+    global _ocr_probing
+
+    with _ocr_lock:
+        if _ocr_probing:
+            return
+        _ocr_probing = True
+    threading.Thread(target=_probe_ocr, name="ocr-probe", daemon=True).start()
+
+
+def _probe_ocr() -> None:
+    global _ocr_cache, _ocr_probing
+
+    try:
+        _ocr_cache = (time.time(), _ask_ocr_whether_we_may())
+    finally:
+        with _ocr_lock:
+            _ocr_probing = False
+
+
+def _ask_ocr_whether_we_may() -> bool:
+    import httpx
+
+    try:
+        response = httpx.post(
+            YANDEX_OCR_URL,
+            json={
+                "content": OCR_PROBE_JPEG,
+                "mimeType": "JPEG",
+                "languageCodes": ["*"],
+                "model": "page",
+            },
+            headers={
+                "Authorization": f"Api-Key {yandex_key()}",
+                "x-folder-id": yandex_folder() or "",
+            },
+            timeout=10.0,
+        )
+    except Exception as err:
+        # Сеть, а не права. Считаем, что нельзя: короткий срок отказа
+        # заставит спросить снова через пять минут.
+        log.warning("Vision OCR не ответил на проверку прав: %s", err)
+        return False
+
+    if response.status_code in (401, 403):
+        log.warning(
+            "Vision OCR закрыт (%s): нужны роль ai.vision.user у сервисного "
+            "аккаунта и область yc.ai.vision.execute у ключа",
+            response.status_code,
+        )
+        return False
+    if response.status_code >= 500:
+        log.warning("Vision OCR отвечает %s — считаем недоступным", response.status_code)
+        return False
+    # 200 — прочитал (на картинке 1×1 читать нечего, и это нормально).
+    # 4xx кроме отказов — запрос не понравился, но до нас дошли и пустили.
+    log.info("Vision OCR доступен (ответ %s)", response.status_code)
+    return True
+
+
+def reset_ocr_cache() -> None:
+    """Забыть, отвечает ли OCR. Нужно тестам и после смены ключа."""
+    global _ocr_cache
+
+    _ocr_cache = None
 
 
 def _parse_card(text: str) -> dict:
