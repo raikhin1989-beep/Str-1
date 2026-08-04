@@ -69,7 +69,8 @@
     {% if wide_choice %}
     <p class="note" style="margin-top:.5rem">В списке весь справочник, а не только
       то, что налито, — значит, среди вариантов есть лишние. Не угадали розлив —
-      называйте похожий: за верный класс тоже дают балл.</p>
+      называйте похожий: за верный класс тоже дают балл. Список разложен по
+      классам, так его быстрее листать.</p>
     {% endif %}
     {% if round == 'palate' %}
     <p class="note" style="margin-top:.5rem">Что вы отвечали в раунде по запаху,
@@ -86,8 +87,15 @@
         <label for="sample_{{ no }}">Что это, по-вашему</label>
         <select id="sample_{{ no }}" name="sample_{{ no }}" data-answer>
           <option value="">— не выбрано —</option>
-          {% for w in choices %}
-            <option value="{{ w.id }}" {% if answers.get(no) == w.id %}selected{% endif %}>{{ w.name }}</option>
+          {# Разложено по классам: плоский список из сотни названий в тёмной
+             комнате не пролистать. Группы заодно показывают, за что даётся
+             частичный балл. #}
+          {% for wclass, group in choice_groups %}
+          <optgroup label="{{ wclass }}">
+            {% for w in group %}
+              <option value="{{ w.id }}" {% if answers.get(no) == w.id %}selected{% endif %}>{{ w.name }}</option>
+            {% endfor %}
+          </optgroup>
           {% endfor %}
         </select>
 

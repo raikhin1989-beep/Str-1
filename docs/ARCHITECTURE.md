@@ -88,6 +88,9 @@ site/                → /var/www/str-1
   static/            app.css, round.js, board.js, me.js — их отдаёт Caddy, не приложение
   robots.txt
 docs/                документация
+tools/               генераторы, на сервер не едут
+  make_preview.py    картинка для превью в мессенджерах
+  make_catalogue.py  справочник ходовых виски → migrations/009_catalogue.sql
 tests/               pytest
 requirements.txt     зависимости приложения (ставятся на сервере)
 requirements-dev.txt зависимости тестов (только CI)

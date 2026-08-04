@@ -43,8 +43,12 @@
     {% if catalogue %}
     <form method="post" action="/admin/tastings/{{ tasting.id }}/samples" class="form row">
       <select name="whisky_id" aria-label="Виски из справочника">
-        {% for w in catalogue %}
-          <option value="{{ w.id }}">{{ w.name }}</option>
+        {% for wclass, group in catalogue %}
+        <optgroup label="{{ wclass }}">
+          {% for w in group %}
+            <option value="{{ w.id }}">{{ w.name }}</option>
+          {% endfor %}
+        </optgroup>
         {% endfor %}
       </select>
       <button type="submit">Добавить</button>

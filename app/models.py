@@ -35,6 +35,11 @@ ALLOWED_TRANSITIONS = {
 # Состав дегустации можно менять и перемешивать только до начала раундов.
 EDITABLE_STATUSES = {"draft", "registration"}
 
+# Класс важен не косметически: по нему начисляются частичные баллы. Список —
+# компромисс между точностью и тем, что человек за столом различает вслепую.
+# Ирландский и японский вынесены по происхождению, а не по типу: спутать
+# Yamazaki с Hakushu — понятная ошибка, и балл за неё уместен, а вот
+# «односолодовый» их с Тайванем и Индией не роднит.
 WHISKY_CLASSES = [
     "односолодовый скотч",
     "купажированный скотч",
@@ -42,6 +47,8 @@ WHISKY_CLASSES = [
     # русский односолодовый и теннесси попали бы в одну корзину и частичный
     # балл давался бы за то, что общего между ними нет (docs/SCORING.md).
     "односолодовый (не Шотландия)",
+    "ирландский",
+    "японский",
     "бурбон",
     "теннесси",
     "ржаной",
@@ -499,13 +506,32 @@ def round_choices(tasting_id: int) -> list[sqlite3.Row]:
         with connect() as conn:
             return by_name(
                 conn.execute(
-                    "SELECT w.id, w.name FROM tasting_whisky tw"
+                    "SELECT w.id, w.name, w.wclass FROM tasting_whisky tw"
                     " JOIN whisky w ON w.id = tw.whisky_id"
                     " WHERE tw.tasting_id = ?",
                     (tasting_id,),
                 ).fetchall()
             )
     return list_whiskies()
+
+
+def grouped_choices(rows) -> list[tuple[str, list]]:
+    """Те же варианты, разложенные по классам — для <optgroup>.
+
+    Справочник разросся до сотни с лишним названий, и плоский список стал
+    свитком: гость крутит его в темноте, с бокалом в руке. Разложенный по
+    классам он листается глазами, а заодно показывает сами классы — то, за
+    что даётся частичный балл (docs/SCORING.md). Порядок групп — как в
+    WHISKY_CLASSES, а не по алфавиту: скотч сверху, «прочее» в конце.
+    """
+    buckets: dict[str, list] = {}
+    for row in rows:
+        wclass = (row["wclass"] or "прочее").strip() or "прочее"
+        buckets.setdefault(wclass, []).append(row)
+    known = [(c, buckets.pop(c)) for c in WHISKY_CLASSES if c in buckets]
+    # Класс, которого нет в словаре, — заведён руками до того, как список
+    # устоялся. Не теряем его: без группы виски пропал бы из вариантов ответа.
+    return known + sorted(buckets.items())
 
 
 def sample_numbers(tasting_id: int) -> list[int]:

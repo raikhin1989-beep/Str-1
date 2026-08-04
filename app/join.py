@@ -159,10 +159,12 @@ def participant_page(request: Request, token: str, error: str = ""):
     if round_name:
         answers = models.get_answers(participant["id"], round_name)
         ratings = models.get_ratings(participant["id"])
+        choices = models.round_choices(tasting["id"])
         context |= {
             "round_title": models.ROUND_TITLES[round_name],
             "samples": models.sample_numbers(tasting["id"]),
-            "choices": models.round_choices(tasting["id"]),
+            "choices": choices,
+            "choice_groups": models.grouped_choices(choices),
             "wide_choice": tasting["answer_scope"] == "catalogue",
             "answers": answers,
             "ratings": {no: dict(row) for no, row in ratings.items()},

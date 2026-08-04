@@ -195,7 +195,11 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             },
             "join_url": join_url,
             "samples": in_tasting,
-            "catalogue": [w for w in models.list_whiskies() if w["id"] not in chosen],
+            # Справочник разросся, поэтому и здесь список по классам:
+            # искать бутылку вечера среди сотни плоских строк невозможно.
+            "catalogue": models.grouped_choices(
+                [w for w in models.list_whiskies() if w["id"] not in chosen]
+            ),
             "statuses": models.STATUS_TITLES,
             "levels": models.CATEGORY_LEVELS,
             "scopes": models.ANSWER_SCOPES,
