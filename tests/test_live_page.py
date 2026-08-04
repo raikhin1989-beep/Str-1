@@ -24,7 +24,10 @@ def test_names_are_alphabetical_regardless_of_alphabet_and_case(guest):
     получался как попало, хотя в SQL стояло ORDER BY."""
     names = [row["name"] for row in models.round_choices(guest["id"])]
     assert names == sorted(names, key=str.casefold)
-    assert names == ["Aberlour Suthainn", "далмор квотер", "джек", "Кемля Американ Оук"]
+
+    ours = [n for n in names if n in
+            {"Aberlour Suthainn", "далмор квотер", "джек", "Кемля Американ Оук"}]
+    assert ours == ["Aberlour Suthainn", "далмор квотер", "джек", "Кемля Американ Оук"]
 
 
 def test_the_catalogue_is_sorted_the_same_way():

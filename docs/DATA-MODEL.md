@@ -13,6 +13,7 @@ SQLite, файл `/var/lib/str-1/app.db`, режим WAL. Схема созда�
 | `title` | text | «Дегустация 8 августа» |
 | `held_on` | date | |
 | `status` | text | `draft` → `registration` → `round_nose` → `round_palate` → `scoring` → `closed` |
+| `answer_scope` | text | `catalogue` — выбор из всего справочника, `tasting` — только из налитого. Меняется до начала раундов |
 | `category_level` | text | `class` или `region` — гранулярность частичных баллов |
 | `created_at` | datetime | |
 

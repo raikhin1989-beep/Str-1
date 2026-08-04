@@ -74,6 +74,21 @@
       {% endfor %}
     </select>
 
+    <label for="answer_scope">Участник выбирает ответ</label>
+    <select id="answer_scope" name="answer_scope" {% if not editable %}disabled{% endif %}>
+      {% for value, label in scopes.items() %}
+        <option value="{{ value }}" {% if tasting.answer_scope == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <p class="note" style="margin:.3rem 0 0">Сейчас в списке
+      <strong>{{ choice_count }}</strong> названий.
+      {% if tasting.answer_scope == 'catalogue' %}Из всего справочника: можно
+      назвать виски, которого на столе нет, и получить балл за угаданный класс.
+      Пополняйте справочник — конкурс становится сложнее.{% else %}Только
+      налитое: конкурс превращается в перестановку, частичный балл почти
+      не срабатывает.{% endif %}
+      {% if not editable %}Менять поздно — раунды начались.{% endif %}</p>
+
     <button type="submit">Сохранить</button>
   </form>
 </section>

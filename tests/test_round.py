@@ -60,10 +60,38 @@ def test_swapping_two_names_is_allowed(tasting):
     assert models.get_answers(me, "nose") == {1: second, 2: first}
 
 
-def test_a_whisky_from_outside_the_tasting_is_refused(tasting):
-    stranger = models.save_whisky({"name": "Ardbeg 10"})
+def test_a_whisky_from_the_catalogue_is_a_valid_answer(tasting):
+    """Назвать можно и то, чего на столе нет: за этим и нужен частичный балл."""
+    other = models.save_whisky({"name": "Ardbeg 10"})
+    models.save_round_draft(tasting["people"][0], "nose", {1: other})
+    assert models.get_answers(tasting["people"][0], "nose") == {1: other}
+
+
+def test_a_whisky_that_does_not_exist_is_refused(tasting):
     with pytest.raises(ValueError, match="нет в составе"):
-        models.save_round_draft(tasting["people"][0], "nose", {1: stranger})
+        models.save_round_draft(tasting["people"][0], "nose", {1: 999999})
+
+
+def test_the_narrow_mode_still_allows_only_what_is_poured():
+    """Режим полегче: список сужен до налитого, чужое не принимается."""
+    tasting_id = models.create_tasting("Полегче", None, "class", "tasting")
+    poured = models.save_whisky({"name": "Oban 14"})
+    models.add_whisky_to_tasting(tasting_id, poured)
+    outsider = models.save_whisky({"name": "Ardbeg 10"})
+    models.set_status(tasting_id, "registration")
+    token = models.register_participant(tasting_id, "Саша")
+    me = models.get_participant_by_token(token)["id"]
+    models.set_status(tasting_id, "round_nose")
+
+    assert [row["name"] for row in models.round_choices(tasting_id)] == ["Oban 14"]
+    with pytest.raises(ValueError, match="нет в составе"):
+        models.save_round_draft(me, "nose", {1: outsider})
+
+
+def test_the_scope_is_frozen_once_the_rounds_start(tasting):
+    """Половина стола уже ответила из одного списка — менять его поздно."""
+    models.update_tasting(tasting["id"], "Первая", None, "class", "tasting")
+    assert models.get_tasting(tasting["id"])["answer_scope"] == "catalogue"
 
 
 def test_submit_needs_every_sample(tasting):

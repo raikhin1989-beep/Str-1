@@ -50,6 +50,11 @@ WHISKY_CLASSES = [
 
 CATEGORY_LEVELS = {"class": "по классу", "region": "по региону"}
 
+# Из чего участник выбирает ответ. Справочник целиком — сложнее и честнее:
+# частичный балл за класс начинает что-то значить, потому что можно назвать
+# виски, которого на столе нет. Только налитое — режим полегче.
+ANSWER_SCOPES = {"catalogue": "из всего справочника", "tasting": "только из налитого"}
+
 
 # ── дегустации ─────────────────────────────────────────────────────────────
 
@@ -70,17 +75,25 @@ def get_tasting(tasting_id: int) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM tasting WHERE id = ?", (tasting_id,)).fetchone()
 
 
-def create_tasting(title: str, held_on: str | None, category_level: str) -> int:
+def create_tasting(
+    title: str,
+    held_on: str | None,
+    category_level: str,
+    answer_scope: str = "catalogue",
+) -> int:
     if category_level not in CATEGORY_LEVELS:
         raise ValueError("неизвестная гранулярность категорий")
+    if answer_scope not in ANSWER_SCOPES:
+        raise ValueError("неизвестный набор вариантов ответа")
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO tasting (title, held_on, category_level, public_code)"
-            " VALUES (?, ?, ?, ?)",
+            "INSERT INTO tasting (title, held_on, category_level, answer_scope, public_code)"
+            " VALUES (?, ?, ?, ?, ?)",
             (
                 title.strip(),
                 (held_on or "").strip() or None,
                 category_level,
+                answer_scope,
                 secrets.token_urlsafe(9),
             ),
         )
@@ -94,14 +107,43 @@ def get_tasting_by_code(code: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def update_tasting(tasting_id: int, title: str, held_on: str | None, category_level: str) -> None:
+def update_tasting(
+    tasting_id: int,
+    title: str,
+    held_on: str | None,
+    category_level: str,
+    answer_scope: str | None = None,
+) -> None:
     if category_level not in CATEGORY_LEVELS:
         raise ValueError("неизвестная гранулярность категорий")
+    if answer_scope is not None and answer_scope not in ANSWER_SCOPES:
+        raise ValueError("неизвестный набор вариантов ответа")
     with connect() as conn:
-        conn.execute(
-            "UPDATE tasting SET title = ?, held_on = ?, category_level = ? WHERE id = ?",
-            (title.strip(), (held_on or "").strip() or None, category_level, tasting_id),
-        )
+        if answer_scope is not None:
+            # Менять набор вариантов после начала раундов нельзя: у половины
+            # стола ответы уже лежат из другого списка.
+            current = conn.execute(
+                "SELECT status FROM tasting WHERE id = ?", (tasting_id,)
+            ).fetchone()
+            if current and current["status"] not in EDITABLE_STATUSES:
+                answer_scope = None
+        if answer_scope is None:
+            conn.execute(
+                "UPDATE tasting SET title = ?, held_on = ?, category_level = ? WHERE id = ?",
+                (title.strip(), (held_on or "").strip() or None, category_level, tasting_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE tasting SET title = ?, held_on = ?, category_level = ?,"
+                " answer_scope = ? WHERE id = ?",
+                (
+                    title.strip(),
+                    (held_on or "").strip() or None,
+                    category_level,
+                    answer_scope,
+                    tasting_id,
+                ),
+            )
 
 
 def set_status(tasting_id: int, new_status: str) -> None:
@@ -442,19 +484,28 @@ def open_round(tasting: sqlite3.Row) -> str | None:
 def round_choices(tasting_id: int) -> list[sqlite3.Row]:
     """Названия для выпадающего списка — по алфавиту.
 
+    По умолчанию это весь справочник: тогда назвать можно и то, чего на столе
+    нет, и частичный балл за класс перестаёт быть формальностью. Режим
+    'tasting' сужает список до налитого — так проще, но и скучнее.
+
     Сознательно не в порядке номеров образцов: список, идущий в том же порядке,
     что и стаканы, сам по себе был бы ответом. Сортировка — через by_name(),
     иначе кириллица встаёт вперемешку (см. там же).
     """
-    with connect() as conn:
-        return by_name(
-            conn.execute(
-                "SELECT w.id, w.name FROM tasting_whisky tw"
-                " JOIN whisky w ON w.id = tw.whisky_id"
-                " WHERE tw.tasting_id = ?",
-                (tasting_id,),
-            ).fetchall()
-        )
+    tasting = get_tasting(tasting_id)
+    if tasting is None:
+        return []
+    if tasting["answer_scope"] == "tasting":
+        with connect() as conn:
+            return by_name(
+                conn.execute(
+                    "SELECT w.id, w.name FROM tasting_whisky tw"
+                    " JOIN whisky w ON w.id = tw.whisky_id"
+                    " WHERE tw.tasting_id = ?",
+                    (tasting_id,),
+                ).fetchall()
+            )
+    return list_whiskies()
 
 
 def sample_numbers(tasting_id: int) -> list[int]:
@@ -617,14 +668,15 @@ def tasting_truth(tasting_id: int) -> dict[int, int]:
 
 
 def whisky_categories(tasting_id: int, level: str) -> dict[int, str | None]:
-    """Категория каждого виски дегустации — по классу или по региону."""
+    """Категория каждого виски — по классу или по региону.
+
+    Берём весь справочник, а не только налитое: назвать можно любой виски,
+    и частичный балл считается по классу названного, каким бы он ни был.
+    Аргумент tasting_id остаётся ради читаемости вызова.
+    """
     column = "region" if level == "region" else "wclass"
     with connect() as conn:
-        rows = conn.execute(
-            f"SELECT w.id, w.{column} AS value FROM tasting_whisky tw"
-            " JOIN whisky w ON w.id = tw.whisky_id WHERE tw.tasting_id = ?",
-            (tasting_id,),
-        ).fetchall()
+        rows = conn.execute(f"SELECT id, {column} AS value FROM whisky").fetchall()
     return {row["id"]: row["value"] for row in rows}
 
 

@@ -139,9 +139,10 @@ def create_tasting(
     title: str = Form(...),
     held_on: str = Form(""),
     category_level: str = Form("class"),
+    answer_scope: str = Form("catalogue"),
 ):
     try:
-        tasting_id = models.create_tasting(title, held_on, category_level)
+        tasting_id = models.create_tasting(title, held_on, category_level, answer_scope)
     except ValueError as err:
         return _redirect(f"/admin/tastings?error={err}")
     return _redirect(f"/admin/tastings/{tasting_id}")
@@ -196,6 +197,8 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             "catalogue": [w for w in models.list_whiskies() if w["id"] not in chosen],
             "statuses": models.STATUS_TITLES,
             "levels": models.CATEGORY_LEVELS,
+            "scopes": models.ANSWER_SCOPES,
+            "choice_count": len(models.round_choices(tasting_id)),
             "next_statuses": models.ALLOWED_TRANSITIONS.get(tasting["status"], []),
             "editable": tasting["status"] in models.EDITABLE_STATUSES,
             "error": error,
@@ -210,9 +213,10 @@ def update_tasting(
     title: str = Form(...),
     held_on: str = Form(""),
     category_level: str = Form("class"),
+    answer_scope: str = Form("catalogue"),
 ):
     try:
-        models.update_tasting(tasting_id, title, held_on, category_level)
+        models.update_tasting(tasting_id, title, held_on, category_level, answer_scope)
     except ValueError as err:
         return _redirect(f"/admin/tastings/{tasting_id}?error={err}")
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Сохранено")

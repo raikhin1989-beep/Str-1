@@ -163,6 +163,7 @@ def participant_page(request: Request, token: str, error: str = ""):
             "round_title": models.ROUND_TITLES[round_name],
             "samples": models.sample_numbers(tasting["id"]),
             "choices": models.round_choices(tasting["id"]),
+            "wide_choice": tasting["answer_scope"] == "catalogue",
             "answers": answers,
             "ratings": {no: dict(row) for no, row in ratings.items()},
             "tags": {no: _tags_for(row, round_name) for no, row in ratings.items()},
