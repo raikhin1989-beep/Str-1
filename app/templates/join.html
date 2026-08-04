@@ -49,10 +49,38 @@
   <button type="submit">Участвую</button>
 </form>
 <p class="note">После этого будет один шаг: привязать телеграм, чтобы прислать вам итоги.</p>
+{% elif finished %}
+<section class="card">
+  <h2>Дегустация окончена</h2>
+  {% if board %}
+  <p>Победил <strong>{{ board[0].name }}</strong> — {{ board[0].total }} баллов.</p>
+  <table class="grid">
+    <thead><tr><th>Место</th><th>Кто</th><th>Очки</th></tr></thead>
+    <tbody>
+      {% for row in board[:3] %}
+      <tr><td class="num">{{ row.place }}</td><td>{{ row.name }}</td><td class="num">{{ row.total }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><a href="/results/{{ tasting.public_code }}">Полные итоги: таблица, что было
+     в стаканах, виски вечера →</a></p>
+  {% else %}
+  <p>Итоги ещё считаются — загляните через несколько минут.</p>
+  {% endif %}
+  {% if known_token %}
+  <p class="note"><a href="/me/{{ known_token }}">Ваш личный разбор →</a></p>
+  {% endif %}
+</section>
 {% else %}
 <section class="card">
-  <p>Регистрация сейчас закрыта — дегустация в состоянии «{{ status_title }}».</p>
-  <p class="note">Если вы уже записывались, откройте свою личную ссылку.</p>
+  <h2>Уже начали</h2>
+  <p>Записаться нельзя: дегустация в состоянии «{{ status_title }}».</p>
+  {% if known_token %}
+  <p><a href="/me/{{ known_token }}">Открыть свою страницу →</a></p>
+  {% else %}
+  <p class="note">Если вы записывались — откройте свою личную ссылку. Потеряли —
+     попросите у ведущего, у него есть все.</p>
+  {% endif %}
 </section>
 {% endif %}
 {% endblock %}

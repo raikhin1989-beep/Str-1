@@ -92,3 +92,22 @@ def test_between_rounds_and_at_scoring_the_guest_is_told_what_is_happening(clien
 
 def test_the_state_of_a_stranger_is_not_told(client):
     assert client.get("/api/me/такого-токена-нет/state").status_code == 404
+
+
+def test_a_finished_evening_without_points_still_explains_itself(client, guest):
+    """Гость мог записаться и не играть — страница не должна молчать."""
+    models.set_status(guest["id"], "round_nose")
+    models.set_status(guest["id"], "round_palate")
+    models.set_status(guest["id"], "scoring")
+    models.compute_results(guest["id"])
+    models.set_status(guest["id"], "closed")
+
+    # Убираем строку итогов, как будто считать было нечего.
+    from app.db import connect
+
+    with connect() as conn:
+        conn.execute("DELETE FROM result")
+
+    page = client.get(f"/me/{guest['token']}").text
+    assert "Дегустация окончена" in page
+    assert "что было в стаканах" in page

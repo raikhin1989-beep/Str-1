@@ -55,8 +55,8 @@ def test_registration_is_closed_outside_its_stage(client):
     tasting_id = models.create_tasting("Тест", None, "class")
     code = models.get_tasting(tasting_id)["public_code"]
     page = client.get(f"/join/{code}")
-    assert "Записаться" not in page.text
-    assert "закрыта" in page.text
+    assert "<h2>Записаться</h2>" not in page.text, "формы регистрации быть не должно"
+    assert "Записаться нельзя" in page.text
     # И напрямую тоже не проходит.
     response = client.post(f"/join/{code}", data={"name": "Пётр"}, follow_redirects=False)
     assert "error" in response.headers["location"]
@@ -253,3 +253,38 @@ def test_the_guest_page_warns_against_writing_to_the_bot_directly(client, bot):
     page = client.get(f"/me/{token}").text
     assert "Открывайте именно эту" in page
     assert "не сработает" in page
+
+
+def test_after_the_evening_the_join_link_shows_the_results(client, bot):
+    """По старому QR приходят и назавтра — тупик «регистрация закрыта» не годится."""
+    tasting_id = models.create_tasting("Прошлый вечер", None, "class")
+    for name in ("Ardbeg 10", "Talisker 10", "Oban 14"):
+        models.add_whisky_to_tasting(tasting_id, models.save_whisky({"name": name}))
+    models.set_status(tasting_id, "registration")
+    token = models.register_participant(tasting_id, "Саша")
+    person = models.get_participant_by_token(token)["id"]
+    models.set_status(tasting_id, "round_nose")
+    models.save_round_draft(person, "nose", dict(models.tasting_truth(tasting_id)))
+    models.set_status(tasting_id, "round_palate")
+    models.set_status(tasting_id, "scoring")
+    models.compute_results(tasting_id)
+    models.set_status(tasting_id, "closed")
+
+    code = models.get_tasting(tasting_id)["public_code"]
+    page = client.get(f"/join/{code}").text
+    assert "Дегустация окончена" in page
+    assert "Победил" in page and "Саша" in page
+    assert f"/results/{code}" in page
+    assert "<h2>Записаться</h2>" not in page
+
+
+def test_a_round_in_progress_points_the_guest_at_their_own_page(client, bot):
+    code = _open_tasting()
+    token = client.post(
+        f"/join/{code}", data={"name": "Саша"}, follow_redirects=False
+    ).headers["location"].removeprefix("/me/")
+    models.set_status(models.get_tasting_by_code(code)["id"], "round_nose")
+
+    page = client.get(f"/join/{code}").text
+    assert "Уже начали" in page
+    assert f"/me/{token}" in page, "телефон помнит гостя — ведём его к себе"

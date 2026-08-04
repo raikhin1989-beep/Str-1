@@ -33,12 +33,18 @@ def join_form(request: Request, code: str, error: str = ""):
     # чтобы не набирать заново.
     here = known if known and known[0]["tasting_id"] == tasting["id"] else None
     before = known if known and here is None else None
+    # Ссылку регистрации открывают и после вечера — по старому QR, из чата,
+    # из закладки. Показывать «записаться нельзя» и всё — тупик: человек
+    # пришёл по ссылке этой дегустации, значит ему нужны её итоги.
+    finished = tasting["status"] in models.RESULT_STATUSES
     return templates.TemplateResponse(
         request,
         "join.html",
         {
             "tasting": tasting,
             "open": tasting["status"] == "registration",
+            "finished": finished,
+            "board": models.leaderboard(tasting["id"]) if finished else [],
             "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
             "error": error,
             "known": here[0] if here else None,
@@ -138,6 +144,7 @@ def participant_page(request: Request, token: str, error: str = ""):
         "error": error,
     }
     if tasting["status"] in models.RESULT_STATUSES:
+        context["finished"] = True
         result = models.personal_result(participant["id"])
         score = models.score_tasting(tasting["id"]).get(participant["id"])
         whiskies = {row["id"]: row["name"] for row in models.round_choices(tasting["id"])}

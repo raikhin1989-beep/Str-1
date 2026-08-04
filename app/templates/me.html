@@ -22,6 +22,14 @@
 </section>
 {% endif %}
 
+{% if finished and not result %}
+<section class="card">
+  <h2>Дегустация окончена</h2>
+  <p>Ваших очков в таблице нет — похоже, вы не успели сдать ни одного раунда.</p>
+  <p><a href="/results/{{ code }}">Посмотреть, что было в стаканах →</a></p>
+</section>
+{% endif %}
+
 {% if result %}
 <section class="card">
   <h2>Ваш результат: {{ result.total }} из {{ max_points }}</h2>
