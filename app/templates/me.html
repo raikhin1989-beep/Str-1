@@ -8,6 +8,20 @@
 
 {% if error %}<p class="msg msg-bad">{{ error }}</p>{% endif %}
 
+{# Состояние вечера рисует сервер, а следит за ним скрипт: раунд открывает
+   ведущий, и страница должна ожить сама. #}
+<div id="live" data-source="/api/me/{{ token }}/state" data-state='{{ state | tojson }}' hidden></div>
+
+{% if waiting_for %}
+<section class="card">
+  <h2>Ждём ведущего</h2>
+  <p>{{ waiting_for }}</p>
+  <button id="start-round" type="button" disabled>Раунд ещё не начался</button>
+  <p class="note" style="margin-top:.5rem">Страницу обновлять не нужно — она
+     сама покажет раунд, как только ведущий его откроет.</p>
+</section>
+{% endif %}
+
 {% if result %}
 <section class="card">
   <h2>Ваш результат: {{ result.total }} из {{ max_points }}</h2>
@@ -125,4 +139,5 @@
 </section>
 
 <p class="note"><a href="/whisky">Посмотреть виски в справочнике →</a></p>
+<script src="/static/me.js" defer></script>
 {% endblock %}

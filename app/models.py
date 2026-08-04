@@ -141,9 +141,20 @@ WHISKY_FIELDS = [
 ]
 
 
+def by_name(rows) -> list[sqlite3.Row]:
+    """Отсортировать по названию по-человечески.
+
+    Не `ORDER BY ... COLLATE NOCASE`: эта коллация в SQLite складывает регистр
+    только для латиницы. «Кемля» у неё оказывается раньше «далмор квотер», и
+    для глаза список выглядит как попало — а гость видит его в раунде и ищет
+    в нём название. Записей десятки, сортировка в Python ничего не стоит.
+    """
+    return sorted(rows, key=lambda row: (row["name"] or "").casefold())
+
+
 def list_whiskies() -> list[sqlite3.Row]:
     with connect() as conn:
-        return conn.execute("SELECT * FROM whisky ORDER BY name COLLATE NOCASE").fetchall()
+        return by_name(conn.execute("SELECT * FROM whisky").fetchall())
 
 
 def get_whisky(whisky_id: int) -> sqlite3.Row | None:
@@ -377,15 +388,18 @@ def round_choices(tasting_id: int) -> list[sqlite3.Row]:
     """Названия для выпадающего списка — по алфавиту.
 
     Сознательно не в порядке номеров образцов: список, идущий в том же порядке,
-    что и стаканы, сам по себе был бы ответом.
+    что и стаканы, сам по себе был бы ответом. Сортировка — через by_name(),
+    иначе кириллица встаёт вперемешку (см. там же).
     """
     with connect() as conn:
-        return conn.execute(
-            "SELECT w.id, w.name FROM tasting_whisky tw"
-            " JOIN whisky w ON w.id = tw.whisky_id"
-            " WHERE tw.tasting_id = ? ORDER BY w.name COLLATE NOCASE",
-            (tasting_id,),
-        ).fetchall()
+        return by_name(
+            conn.execute(
+                "SELECT w.id, w.name FROM tasting_whisky tw"
+                " JOIN whisky w ON w.id = tw.whisky_id"
+                " WHERE tw.tasting_id = ?",
+                (tasting_id,),
+            ).fetchall()
+        )
 
 
 def sample_numbers(tasting_id: int) -> list[int]:

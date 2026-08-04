@@ -109,6 +109,16 @@ def participant_page(request: Request, token: str, error: str = ""):
         "token": token,
         "my_url": _public_url(request, f"/me/{token}"),
         "round": round_name,
+        # Состояние, с которым страница отрисована: скрипт сравнивает с ним
+        # ответы опроса и перезагружает страницу, когда что-то изменилось.
+        "state": {
+            "status": tasting["status"],
+            "round": round_name,
+            "submitted": models.round_submitted(participant["id"], round_name)
+            if round_name
+            else False,
+        },
+        "waiting_for": _waiting_for(tasting["status"]),
         "error": error,
     }
     if tasting["status"] in models.RESULT_STATUSES:
@@ -138,9 +148,43 @@ def participant_page(request: Request, token: str, error: str = ""):
     return _remember(templates.TemplateResponse(request, "me.html", context), request, token)
 
 
+# Чего ждёт гость в каждом состоянии до итогов. None означает «ждать нечего».
+_WAITING = {
+    "draft": "Ведущий ещё готовит дегустацию.",
+    "registration": "Все записываются. Скоро начнём.",
+    "round_nose": None,
+    "round_palate": None,
+    "scoring": "Ведущий считает итоги.",
+}
+
+
+def _waiting_for(status: str) -> str | None:
+    return _WAITING.get(status)
+
+
 def _public_url(request: Request, path: str) -> str:
     """Адрес для показа гостю: домен важнее того, откуда открыта страница."""
     return (public_base_url() or str(request.base_url).rstrip("/")) + path
+
+
+@router.get("/api/me/{token}/state")
+def participant_state(token: str):
+    """Что сейчас происходит — для страницы участника.
+
+    Раунд открывает ведущий, а гость в это время смотрит в свой телефон.
+    Без этого он видит «ждём» до тех пор, пока не догадается обновить
+    страницу сам, — а за столом никто не догадывается.
+    """
+    participant = models.get_participant_by_token(token)
+    if participant is None:
+        raise HTTPException(status_code=404, detail="Участник не найден")
+    tasting = models.get_tasting(participant["tasting_id"])
+    round_name = models.open_round(tasting)
+    return {
+        "status": tasting["status"],
+        "round": round_name,
+        "submitted": models.round_submitted(participant["id"], round_name) if round_name else False,
+    }
 
 
 def _tags_for(rating, round_name: str) -> str:

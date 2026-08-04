@@ -298,3 +298,12 @@ input[type="range"] { padding: 0; border: 0; background: transparent; accent-col
   padding: .3rem .4rem;
   font-size: .85rem;
 }
+
+/* Кнопка «раунд ещё не начался»: видно, что она есть и что пока не нажать. */
+button[disabled] {
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: default;
+}
+
+button[disabled]:hover { background: transparent; border-color: var(--line); }
