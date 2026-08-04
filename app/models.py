@@ -352,6 +352,61 @@ def register_participant(tasting_id: int, name: str, contact: str = "") -> str:
     return token
 
 
+def carry_over_telegram(previous_id: int, participant_id: int) -> bool:
+    """Перенести привязку телеграма со старой записи участника на новую.
+
+    Гость, который приходит второй раз, уже проходил всю возню с ботом.
+    Заставлять его повторять её — единственное, что он запомнит о вечере.
+
+    Переносим только с той записи, которую этот же телефон открывал раньше:
+    доверять полю «куда прислать» тут нельзя, туда можно вписать чужой ник,
+    и итоги ушли бы постороннему человеку.
+    """
+    with connect() as conn:
+        previous = conn.execute(
+            "SELECT tg_chat_id, tg_username, contact FROM participant WHERE id = ?",
+            (previous_id,),
+        ).fetchone()
+        if previous is None or previous["tg_chat_id"] is None:
+            return False
+        conn.execute(
+            "UPDATE participant SET tg_chat_id = ?, tg_username = ?,"
+            " contact = COALESCE(NULLIF(contact, ''), ?)"
+            " WHERE id = ? AND tg_chat_id IS NULL",
+            (previous["tg_chat_id"], previous["tg_username"], previous["contact"], participant_id),
+        )
+        return True
+
+
+def matching_telegram(tasting_id: int, participant_id: int) -> sqlite3.Row | None:
+    """Тот же человек на прошлой дегустации — по контакту или нику в телеграме.
+
+    Только подсказка ведущему: связывать по совпадению строки автоматически
+    нельзя, контакт пишет сам гость и может ошибиться или указать чужой.
+    """
+    with connect() as conn:
+        me = conn.execute(
+            "SELECT contact, tg_chat_id FROM participant WHERE id = ?", (participant_id,)
+        ).fetchone()
+        if me is None or me["tg_chat_id"] is not None:
+            return None
+        needle = (me["contact"] or "").strip().lstrip("@").casefold()
+        if not needle:
+            return None
+        for row in conn.execute(
+            "SELECT p.*, t.title FROM participant p JOIN tasting t ON t.id = p.tasting_id"
+            " WHERE p.tg_chat_id IS NOT NULL AND p.tasting_id != ? ORDER BY p.id DESC",
+            (tasting_id,),
+        ):
+            candidates = {
+                (row["contact"] or "").strip().lstrip("@").casefold(),
+                (row["tg_username"] or "").strip().lstrip("@").casefold(),
+            }
+            if needle in candidates - {""}:
+                return row
+    return None
+
+
 def link_telegram(token: str, chat_id: int, username: str | None) -> sqlite3.Row | None:
     """Привязать телеграм-аккаунт к участнику по токену из deep link'а."""
     with connect() as conn:

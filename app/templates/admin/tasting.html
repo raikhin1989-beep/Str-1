@@ -100,7 +100,14 @@
       <tr>
         <td>{{ p.name }}</td>
         <td>{{ p.contact or "—" }}</td>
-        <td>{% if p.tg_chat_id %}привязан{% if p.tg_username %} (@{{ p.tg_username }}){% endif %}{% else %}—{% endif %}</td>
+        <td>
+          {% if p.tg_chat_id %}привязан{% if p.tg_username %} (@{{ p.tg_username }}){% endif %}
+          {% elif matches[p.id] %}
+            <form method="post" action="/admin/tastings/{{ tasting.id }}/participants/{{ p.id }}/carry" class="inline">
+              <button class="link" type="submit">перенести с «{{ matches[p.id].title }}»</button>
+            </form>
+          {% else %}—{% endif %}
+        </td>
         <td>
           <input class="link-cell" readonly onclick="this.select()" value="{{ me_urls[p.id] }}">
           <a href="/qr.svg?data={{ me_urls[p.id] | urlencode }}" target="_blank" rel="noopener">QR</a>

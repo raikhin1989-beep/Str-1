@@ -20,14 +20,28 @@
 {% endif %}
 
 {% if open %}
+{% if before %}
+<section class="card">
+  <h2>С возвращением</h2>
+  <p>В прошлый раз вы были <strong>{{ before.name }}</strong>. Имя и контакт уже
+     подставлены — проверьте и жмите «Участвую».</p>
+  {% if before_linked %}
+  <p class="note" style="margin-top:.5rem">Телеграм привязывать заново не нужно:
+     перенесём с прошлой дегустации.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <form method="post" action="/join/{{ tasting.public_code }}" class="card form">
   <h2>Записаться</h2>
   <label for="name">Как вас записать</label>
   <input id="name" name="name" required maxlength="60" autocomplete="name"
+         value="{{ before.name if before else '' }}"
          placeholder="Имя, которое увидят за столом" {% if not known %}autofocus{% endif %}>
 
   <label for="contact">Куда прислать ссылку <span class="hint">(необязательно)</span></label>
   <input id="contact" name="contact" maxlength="120"
+         value="{{ before.contact if before and before.contact else '' }}"
          placeholder="@ник в телеграме, телефон или почта">
   <p class="note" style="margin:.3rem 0 0">Личная ссылка — единственный вход на
     вашу страницу. Оставьте контакт, и ведущий пришлёт её, если потеряется.</p>

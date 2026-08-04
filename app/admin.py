@@ -180,6 +180,13 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             "participants": models.list_participants(tasting_id),
             # Личные ссылки гостей: ссылку теряют чаще всего, и восстановить
             # её должен уметь ведущий, а не тот, кто ходит в базу.
+            # Совпадения по контакту с прошлыми дегустациями: связывать
+            # автоматически нельзя (контакт пишет сам гость), поэтому это
+            # подсказка с кнопкой — решает ведущий, он знает, кто за столом.
+            "matches": {
+                person["id"]: models.matching_telegram(tasting_id, person["id"])
+                for person in models.list_participants(tasting_id)
+            },
             "me_urls": {
                 person["id"]: _public(request, f"/me/{person['join_token']}")
                 for person in models.list_participants(tasting_id)
@@ -249,6 +256,20 @@ def telegram_page(request: Request):
             "hook_path": "/tg/<секрет вебхука>",
         },
     )
+
+
+@router.post(
+    "/tastings/{tasting_id}/participants/{participant_id}/carry",
+    dependencies=[Depends(require_admin)],
+)
+def carry_telegram(request: Request, tasting_id: int, participant_id: int):
+    """Перенести телеграм с прошлой дегустации — по решению ведущего."""
+    match = models.matching_telegram(tasting_id, participant_id)
+    if match is None:
+        return _redirect(f"/admin/tastings/{tasting_id}?error=Совпадения больше нет")
+    models.carry_over_telegram(match["id"], participant_id)
+    _note(request, "tasting.carry", f"участник {participant_id} ← {match['id']}")
+    return _redirect(f"/admin/tastings/{tasting_id}?ok=Телеграм перенесён")
 
 
 @router.get("/backup", dependencies=[Depends(require_admin)])

@@ -28,6 +28,11 @@ def join_form(request: Request, code: str, error: str = ""):
     if tasting is None:
         raise HTTPException(status_code=404, detail="Дегустация не найдена")
     known = remembered(request)
+    # Та же дегустация — предложить вернуться на свою страницу. Другая —
+    # это гость, который пришёл во второй раз: подставим ему имя и контакт,
+    # чтобы не набирать заново.
+    here = known if known and known[0]["tasting_id"] == tasting["id"] else None
+    before = known if known and here is None else None
     return templates.TemplateResponse(
         request,
         "join.html",
@@ -36,10 +41,10 @@ def join_form(request: Request, code: str, error: str = ""):
             "open": tasting["status"] == "registration",
             "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
             "error": error,
-            # Тот же телефон уже открывал чью-то личную страницу — предложим
-            # вернуться на неё, а не заводить второго участника с тем же именем.
-            "known": known[0] if known else None,
-            "known_token": known[1] if known else None,
+            "known": here[0] if here else None,
+            "known_token": here[1] if here else None,
+            "before": before[0] if before else None,
+            "before_linked": bool(before and before[0]["tg_chat_id"]),
         },
     )
 
@@ -56,10 +61,20 @@ def join(request: Request, code: str, name: str = Form(""), contact: str = Form(
             f"/join/{code}?error=Слишком много записей подряд, подождите немного",
             status_code=303,
         )
+    known = remembered(request)
     try:
         token = models.register_participant(tasting["id"], name, contact)
     except ValueError as err:
         return RedirectResponse(f"/join/{code}?error={err}", status_code=303)
+
+    # Второй раз на дегустации — телеграм переносим сам. Основание: это тот же
+    # телефон, который открывал прошлую запись. Возиться с ботом повторно
+    # человек не должен, а по строчке контакта связывать нельзя — см. models.
+    if known and known[0]["tasting_id"] != tasting["id"]:
+        new_id = models.get_participant_by_token(token)["id"]
+        if models.carry_over_telegram(known[0]["id"], new_id):
+            _tg_log("перенос", f"{name}: телеграм с прошлой дегустации")
+
     return _remember(RedirectResponse(f"/me/{token}", status_code=303), request, token)
 
 
