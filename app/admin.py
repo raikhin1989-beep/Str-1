@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
-from app import ai, auth, backup, broadcast, models
+from app import ai, auth, backup, broadcast, models, telegram
 from app.config import admin_password, public_base_url
 from app.db import connect, log_action
 
@@ -223,6 +223,32 @@ def change_status(request: Request, tasting_id: int, status: str = Form(...)):
         models.compute_results(tasting_id)
     _note(request, "tasting.status", f"дегустация {tasting_id} → {status}")
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Статус изменён")
+
+
+@router.get("/telegram", dependencies=[Depends(require_admin)])
+def telegram_page(request: Request):
+    """Что происходит с ботом.
+
+    Существует ради одного вопроса: «я нажал Старт, почему не привязалось?».
+    Ответ виден в журнале: если записей нет вовсе — телеграм до нас не дошёл;
+    если стоит «Старт без кода» — человек написал боту сам, а не открыл свою
+    ссылку привязки.
+    """
+    with connect() as conn:
+        events = conn.execute(
+            "SELECT at, action, details FROM audit_log"
+            " WHERE action LIKE 'tg.%' ORDER BY id DESC LIMIT 30"
+        ).fetchall()
+    return templates.TemplateResponse(
+        request,
+        "admin/telegram.html",
+        {
+            "events": events,
+            "bot": telegram.known_username(),
+            "configured": telegram.is_configured(),
+            "hook_path": "/tg/<секрет вебхука>",
+        },
+    )
 
 
 @router.get("/backup", dependencies=[Depends(require_admin)])

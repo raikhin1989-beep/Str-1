@@ -59,7 +59,7 @@ on:
       action:
         description: "Что сделать на сервере"
         type: choice
-        options: [deploy, inspect, broadcast]
+        options: [deploy, inspect, broadcast, telegram]
         default: deploy
 
 concurrency:
@@ -811,6 +811,41 @@ jobs:
             echo "отметки о доставке записаны"
           fi
           [ "$failed" = "0" ] || echo "::warning::часть сообщений не дошла — повторный запуск догонит"
+
+  # ── TELEGRAM: спросить у самого телеграма, что с вебхуком ──────────────────
+  # Нужно ровно для одного вопроса: «нажал Старт, а привязки нет — почему?».
+  # Ответ либо здесь (телеграм не может до нас достучаться), либо в админке,
+  # на странице «Телеграм» (дошло, но без кода привязки).
+  telegram:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'telegram' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask Telegram about the webhook
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN не задан"
+            exit 1
+          fi
+          curl -sS --max-time 20 "https://api.telegram.org/bot$TOKEN/getWebhookInfo" > hook.json
+          python3 - <<'PY'
+          import json
+          info = json.load(open("hook.json")).get("result", {})
+          # Сам адрес не печатаем: в нём секрет вебхука.
+          print("вебхук задан:      ", "да" if info.get("url") else "НЕТ")
+          print("ждут доставки:     ", info.get("pending_update_count", 0))
+          print("последняя ошибка:  ", info.get("last_error_message") or "нет")
+          if info.get("last_error_date"):
+              import datetime
+              print("когда была ошибка: ",
+                    datetime.datetime.fromtimestamp(info["last_error_date"], datetime.UTC))
+          print("типы обновлений:   ", info.get("allowed_updates") or "все")
+          if not info.get("url"):
+              print("::warning::вебхук не зарегистрирован — запустите обычный деплой, он его ставит")
+          if info.get("last_error_message"):
+              print("::warning::телеграм не смог доставить обновление — текст ошибки выше")
+          PY
 
   # ── INSPECT: только осмотреть сервер, ничего не менять ──────────────────────
   inspect:

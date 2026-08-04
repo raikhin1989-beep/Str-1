@@ -176,3 +176,80 @@ def test_without_the_public_address_links_fall_back_to_the_current_one(admin, mo
     tasting_id = models.create_tasting("Первая", None, "class")
     page = admin.get(f"/admin/tastings/{tasting_id}").text
     assert "http://testserver/join/" in page
+
+
+def test_start_without_a_code_is_logged_as_a_miss(client, bot):
+    """Самая частая причина «не привязалось»: человек написал боту сам."""
+    from app.db import connect
+
+    response = client.post(
+        f"/tg/{SECRET}",
+        json={"message": {"chat": {"id": 555}, "text": "/start"}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": SECRET},
+    )
+    assert response.status_code == 200
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT action, details FROM audit_log WHERE action LIKE 'tg.%' ORDER BY id DESC"
+        ).fetchone()
+    assert row["action"] == "tg.мимо"
+    assert row["details"] == "Старт без кода"
+
+
+def test_a_successful_link_is_logged_too(client, bot):
+    from app.db import connect
+
+    code = _open_tasting()
+    token = client.post(
+        f"/join/{code}", data={"name": "Саша"}, follow_redirects=False
+    ).headers["location"].removeprefix("/me/")
+
+    client.post(
+        f"/tg/{SECRET}",
+        json={"message": {"chat": {"id": 555}, "text": f"/start {token}",
+                          "from": {"username": "sasha"}}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": SECRET},
+    )
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT action, details FROM audit_log WHERE action LIKE 'tg.%' ORDER BY id DESC"
+        ).fetchone()
+    assert row["action"] == "tg.привязка"
+    assert "Саша" in row["details"] and "@sasha" in row["details"]
+
+
+def test_a_stale_code_is_logged_as_a_stranger(client, bot):
+    from app.db import connect
+
+    client.post(
+        f"/tg/{SECRET}",
+        json={"message": {"chat": {"id": 555}, "text": "/start кода-такого-нет"}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": SECRET},
+    )
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT action FROM audit_log WHERE action LIKE 'tg.%' ORDER BY id DESC"
+        ).fetchone()
+    assert row["action"] == "tg.чужой код"
+
+
+def test_the_admin_page_shows_what_arrived(admin, client, bot):
+    client.post(
+        f"/tg/{SECRET}",
+        json={"message": {"chat": {"id": 555}, "text": "/start"}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": SECRET},
+    )
+    page = admin.get("/admin/telegram").text
+    assert "Старт без кода" in page
+    assert "raikhinwhiskey_bot" in page
+    assert "Как это читать" in page
+
+
+def test_the_guest_page_warns_against_writing_to_the_bot_directly(client, bot):
+    code = _open_tasting()
+    token = client.post(
+        f"/join/{code}", data={"name": "Саша"}, follow_redirects=False
+    ).headers["location"].removeprefix("/me/")
+    page = client.get(f"/me/{token}").text
+    assert "Открывайте именно эту" in page
+    assert "не сработает" in page

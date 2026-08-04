@@ -1,0 +1,50 @@
+{% extends "admin/base.html" %}
+
+{% block admin %}
+<h1 class="title">Телеграм</h1>
+<p class="lead">Что приходит от бота и что с этим происходит.</p>
+
+<section class="card">
+  <h2>Настройка</h2>
+  <dl class="facts">
+    <dt>Токен и секрет</dt><dd>{{ "заданы" if configured else "не заданы" }}</dd>
+    <dt>Бот</dt><dd>{% if bot %}@{{ bot }}{% else %}имя неизвестно{% endif %}</dd>
+    <dt>Вебхук</dt><dd>{{ hook_path }}</dd>
+  </dl>
+  <p class="note">Исходящие с этого сервера к api.telegram.org не проходят,
+    поэтому бот ничего не отвечает в чат. На привязку это не влияет: она идёт
+    в обратную сторону — телеграм стучится к нам.</p>
+</section>
+
+<section class="card">
+  <h2>Последние события</h2>
+  {% if events %}
+  <table class="grid">
+    <thead><tr><th>Когда</th><th>Что</th><th>Подробности</th></tr></thead>
+    <tbody>
+      {% for e in events %}
+      <tr>
+        <td>{{ e.at }}</td>
+        <td>{{ e.action.replace("tg.", "") }}</td>
+        <td>{{ e.details }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Пусто — от телеграма ещё ничего не приходило.</p>
+  {% endif %}
+
+  <h2 style="margin-top:1.5rem">Как это читать</h2>
+  <dl class="facts">
+    <dt>привязка</dt><dd>всё получилось, участник связан с чатом</dd>
+    <dt>мимо</dt><dd>сообщение пришло, но привязки в нём нет. «Старт без кода» —
+      человек написал боту сам, а не открыл ссылку со своей страницы</dd>
+    <dt>чужой код</dt><dd>код в ссылке не совпал ни с одним участником —
+      обычно ссылка от прошлой дегустации</dd>
+    <dt>отказ</dt><dd>постучались не тем секретом: это не наш телеграм</dd>
+    <dt>пусто</dt><dd>телеграм до нас вообще не доходит — проверьте вебхук:
+      Actions → Deploy to server → Run workflow → действие <code>telegram</code></dd>
+  </dl>
+</section>
+{% endblock %}

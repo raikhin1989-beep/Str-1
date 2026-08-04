@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from app import auth, limits, models, scoring, telegram
 from app.config import public_base_url
+from app.db import connect, log_action
 
 log = logging.getLogger("str1.join")
 
@@ -365,6 +366,27 @@ def qr(data: str):
     )
 
 
+def _describe(update: dict) -> str:
+    """Коротко, что пришло, — без пересказа чужой переписки.
+
+    В журнал попадает только вид сообщения и первое слово команды: этого
+    хватает, чтобы понять «нажали Старт без кода», и не хватает, чтобы
+    прочитать, о чём человек писал боту.
+    """
+    message = update.get("message") or {}
+    text = (message.get("text") or "").strip()
+    if not text:
+        return "сообщение без текста"
+    if text.startswith("/start"):
+        return "Старт без кода" if len(text.split()) < 2 else "Старт с кодом"
+    return "не команда Старт"
+
+
+def _tg_log(action: str, details: str) -> None:
+    with connect() as conn:
+        log_action(conn, None, f"tg.{action}", details[:200])
+
+
 @router.post("/tg/{secret}")
 async def telegram_webhook(
     request: Request,
@@ -379,17 +401,25 @@ async def telegram_webhook(
     """
     expected = telegram.webhook_secret()
     if not expected or secret != expected or x_telegram_bot_api_secret_token != expected:
+        _tg_log("отказ", "секрет не совпал")
         raise HTTPException(status_code=404, detail="Not Found")
 
     update = await request.json()
     parsed = telegram.parse_start_command(update)
     if parsed is None:
         # Не привязка — молча соглашаемся: телеграм повторяет обновления,
-        # на которые ответили ошибкой.
+        # на которые ответили ошибкой. Но в журнал пишем: «нажал Старт без
+        # кода» — самая частая причина, по которой привязка «не работает».
+        _tg_log("мимо", _describe(update))
         return {"ok": True}
 
     chat_id, token, username = parsed
     participant = models.link_telegram(token, chat_id, username)
+    _tg_log(
+        "привязка" if participant else "чужой код",
+        f"{participant['name'] if participant else 'код ' + token[:6] + '…'}"
+        f"{', @' + username if username else ''}",
+    )
     if participant is None:
         telegram.send_message(
             chat_id,
