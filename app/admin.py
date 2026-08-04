@@ -1,6 +1,7 @@
 """Админка: вход, дегустации, справочник виски."""
 
 import tempfile
+from urllib.parse import quote
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -399,7 +400,12 @@ def import_whisky_from_ai(cache_key: str = Form(...)):
         whisky_id = models.save_whisky(card, source="ai")
     except ValueError as err:
         return _redirect(f"/admin/whiskies?error={err}")
-    return _redirect(f"/admin/whiskies/{whisky_id}?ok=Добавлено из распознавания — проверьте поля")
+    # Возвращаем туда, откуда пришли: карточку распознают из поиска, и после
+    # сохранения человек хочет видеть, что виски теперь в справочнике, а не
+    # оказаться в форме правки, о которой не просил. Ссылка на правку —
+    # там же, одним щелчком.
+    name = quote(str(card.get("name") or ""))
+    return _redirect(f"/whisky?q={name}&added={whisky_id}")
 
 
 @router.get("/whiskies/{whisky_id}", dependencies=[Depends(require_admin)])

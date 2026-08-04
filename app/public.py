@@ -18,8 +18,9 @@ router = APIRouter()
 
 
 @router.get("/whisky")
-def whisky_search(request: Request, q: str = ""):
+def whisky_search(request: Request, q: str = "", added: int | None = None):
     found = models.search_whiskies(q)
+    is_admin = auth.session_is_valid(request.cookies.get(auth.COOKIE_NAME))
     return templates.TemplateResponse(
         request,
         "whisky_search.html",
@@ -29,6 +30,9 @@ def whisky_search(request: Request, q: str = ""):
             "searched": bool(q.strip()),
             "ai_available": ai.is_configured(),
             "photo_available": ai.supports_images(),
+            # Сюда возвращается админ после «добавить в справочник».
+            "added": models.get_whisky(added) if added else None,
+            "is_admin": is_admin,
         },
     )
 

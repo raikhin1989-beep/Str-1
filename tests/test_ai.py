@@ -159,3 +159,41 @@ def test_guest_cannot_import(client, fake_model):
     )
     assert response.status_code == 303
     assert response.headers["location"] == "/admin/login"
+
+
+def test_import_returns_to_the_search_page(admin, fake_model):
+    """Карточку распознают из поиска — туда и возвращаемся, а не в форму правки."""
+    ai.lookup_by_name("Aberlour 13")
+    response = admin.post(
+        "/admin/whiskies/import",
+        data={"cache_key": ai.cache_key_for_name("Aberlour 13")},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/whisky?q=")
+    assert "added=" in location
+
+    page = admin.get(location).text
+    assert "добавлен в справочник" in page
+    assert CARD["name"] in page
+    assert "Проверить поля" in page, "правка на месте, просто одним щелчком"
+
+
+def test_a_guest_on_that_page_sees_no_admin_link(admin, fake_model):
+    """Отдельный клиент: фикстура admin — это тот же браузер с куки входа."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    ai.lookup_by_name("Aberlour 13")
+    location = admin.post(
+        "/admin/whiskies/import",
+        data={"cache_key": ai.cache_key_for_name("Aberlour 13")},
+        follow_redirects=False,
+    ).headers["location"]
+
+    with TestClient(app) as guest:
+        page = guest.get(location).text
+    assert "добавлен в справочник" in page
+    assert "Проверить поля" not in page

@@ -7,6 +7,12 @@
 <h1 class="title">Что за виски?</h1>
 <p class="lead">Введите название — покажем цвет, нос, вкус, послевкусие и остальное.</p>
 
+{% if added %}
+<p class="msg msg-ok">«{{ added.name }}» добавлен в справочник.
+  {% if is_admin %}<a href="/admin/whiskies/{{ added.id }}">Проверить поля →</a>{% endif %}
+</p>
+{% endif %}
+
 <form method="get" action="/whisky" class="form row">
   <input name="q" value="{{ query }}" placeholder="Aberlour, Далмор, Speyside…"
          autocomplete="off" aria-label="Название виски" autofocus>
