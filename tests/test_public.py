@@ -16,12 +16,17 @@ def _fill_catalogue():
     )
 
 
-def test_search_page_lists_catalogue_without_query(client):
+def test_an_empty_query_shows_no_list_at_all(client):
+    """Раньше страница открывалась всем справочником — полутора сотнями
+    названий, в которых тонула сама форма. Человек приходит сюда
+    с конкретной бутылкой в руке, а не листать каталог."""
     _fill_catalogue()
     response = client.get("/whisky")
     assert response.status_code == 200
-    assert "Aberlour 13 Double Cask" in response.text
-    assert "Jack Daniel&#39;s Single Barrel Rye" in response.text
+    assert "Aberlour 13 Double Cask" not in response.text
+    assert "Jack Daniel" not in response.text
+    # Но спросить по-прежнему есть чем, и это первое, что видно.
+    assert "Название виски" in response.text
 
 
 def test_search_finds_by_partial_latin_name(client):
@@ -61,7 +66,7 @@ def test_search_offers_ai_only_when_key_is_present(client, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "тестовый-ключ")
     with_key = client.get("/whisky", params={"q": "нет такого"}).text
     assert "Спросить у ИИ" in with_key
-    assert "Сфотографируйте этикетку" in with_key
+    assert "Этикетка фотографией" in with_key
 
 
 def test_card_shows_filled_fields_only(client):
@@ -97,3 +102,38 @@ def test_public_pages_never_reveal_tasting_or_sample_numbers(client):
 
 def test_index_links_to_search(client):
     assert '/whisky' in client.get("/").text
+
+
+def test_both_ways_to_ask_are_together_at_the_top(client, monkeypatch):
+    """Фотография нужна как раз тому, кто названия не знает, — а лежала она
+    отдельным блоком под выдачей, куда ещё надо было долистать."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "тестовый-ключ")
+    _fill_catalogue()
+    page = client.get("/whisky", params={"q": "aberlour"}).text
+
+    by_name = page.index('name="q"')
+    by_photo = page.index('type="file"')
+    first_result = page.index("Aberlour 13 Double Cask")
+    assert by_name < by_photo < first_result, "оба способа спросить — до выдачи"
+    # И в одной карточке, а не в двух разных местах страницы.
+    block = page[page.index('class="card find"') : first_result]
+    assert 'name="q"' in block and 'type="file"' in block
+
+
+def test_the_photo_field_does_not_force_the_camera(client, monkeypatch):
+    """capture открывал сразу камеру: снять этикетку прямо сейчас можно
+    не всегда, а из галереи выбрать — почти всегда."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "тестовый-ключ")
+    page = client.get("/whisky").text
+    assert "capture=" not in page
+    assert "галереи" in page
+
+
+def test_the_photo_form_works_without_javascript(client, monkeypatch):
+    """Скрипт только убирает лишнее касание. Кнопка остаётся в разметке:
+    вечер не должен зависеть от того, выполнился ли find.js."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "тестовый-ключ")
+    page = client.get("/whisky").text
+    form = page[page.index('id="byphoto"') : page.index("</form>", page.index('id="byphoto"'))]
+    assert 'action="/whisky/photo"' in page
+    assert "Распознать" in form, "без JS отправлять форму нечем"

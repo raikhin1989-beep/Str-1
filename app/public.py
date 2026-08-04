@@ -19,7 +19,12 @@ router = APIRouter()
 
 @router.get("/whisky")
 def whisky_search(request: Request, q: str = "", added: int | None = None):
-    found = models.search_whiskies(q)
+    # Пустой запрос — пустая выдача, а не весь справочник. Раньше страница
+    # открывалась простынёй из полутора сотен названий, в которой тонула
+    # сама форма поиска; справочник тут никому не нужен целиком — человек
+    # приходит с конкретной бутылкой в руке.
+    searched = bool(q.strip())
+    found = models.search_whiskies(q) if searched else []
     is_admin = auth.session_is_valid(request.cookies.get(auth.COOKIE_NAME))
     return templates.TemplateResponse(
         request,
@@ -27,7 +32,7 @@ def whisky_search(request: Request, q: str = "", added: int | None = None):
         {
             "query": q,
             "found": found,
-            "searched": bool(q.strip()),
+            "searched": searched,
             "ai_available": ai.is_configured(),
             "photo_available": ai.supports_images(),
             # Сюда возвращается админ после «добавить в справочник».

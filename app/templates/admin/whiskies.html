@@ -3,6 +3,14 @@
 {% block admin %}
 <h1 class="title">Справочник виски</h1>
 
+{# Записей полторы сотни: без поиска нужную строку не найти, а править
+   и удалять приходится именно конкретную. #}
+<form method="get" action="/admin/whiskies" class="form row">
+  <input name="q" value="{{ query }}" placeholder="название, винокурня или регион"
+         autocomplete="off" aria-label="Поиск по справочнику">
+  <button type="submit">Найти</button>
+</form>
+
 <form method="post" action="/admin/whiskies" class="card form">
   <h2>Добавить виски</h2>
   <label for="name">Название</label>
@@ -21,6 +29,12 @@
 </form>
 
 {% if whiskies %}
+<p class="note">
+  {% if query %}Нашлось: {{ whiskies|length }} из {{ total }} ·
+    <a href="/admin/whiskies">показать все</a>
+  {% else %}Всего записей: {{ total }}{% endif %}
+</p>
+<div class="scroller">
 <table class="grid">
   <thead><tr><th>Название</th><th>Класс</th><th>Регион</th><th>Крепость</th><th>Откуда</th></tr></thead>
   <tbody>
@@ -35,6 +49,11 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
+<p class="note">Название — ссылка на правку: там же все поля и удаление.</p>
+{% elif query %}
+<p class="note">По запросу «{{ query }}» ничего нет.
+  <a href="/admin/whiskies">Показать все {{ total }}</a>.</p>
 {% else %}
 <p class="note">Справочник пуст.</p>
 {% endif %}

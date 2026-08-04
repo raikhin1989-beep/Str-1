@@ -5,7 +5,8 @@
 
 {% block content %}
 <h1 class="title">Что за виски?</h1>
-<p class="lead">Введите название — покажем цвет, нос, вкус, послевкусие и остальное.</p>
+<p class="lead">Наберите название или покажите бутылку — расскажем про цвет,
+  нос, вкус, послевкусие и вводные.</p>
 
 {% if added %}
 <p class="msg msg-ok">«{{ added.name }}» добавлен в справочник.
@@ -13,14 +14,39 @@
 </p>
 {% endif %}
 
-<form method="get" action="/whisky" class="form row">
-  <input name="q" value="{{ query }}" placeholder="Aberlour, Далмор, Speyside…"
-         autocomplete="off" aria-label="Название виски" autofocus>
-  <button type="submit">Найти</button>
-</form>
+{# Два способа спросить одно и то же, поэтому они рядом и первыми на странице.
+   Формы всё же разные: название уходит GET-ом (ссылку на поиск можно
+   переслать), фотография — POST-ом с файлом. #}
+<section class="card find">
+  <form method="get" action="/whisky" class="form row">
+    {# Без autofocus: клавиатура открывалась сразу и выталкивала способ
+       «по фотографии» за нижний край — а он тут равноправный. #}
+    <input name="q" value="{{ query }}" placeholder="Aberlour, Далмор, Speyside…"
+           autocomplete="off" aria-label="Название виски">
+    <button type="submit">Найти</button>
+  </form>
+
+  {% if photo_available %}
+  <form method="post" action="/whisky/photo" enctype="multipart/form-data"
+        class="form byphoto" id="byphoto">
+    <p class="or">или</p>
+    {# Поле идёт перед подписью, хотя видно как раз подпись: так обводку
+       при переходе клавиатурой можно нарисовать на ней соседним селектором.
+       Ни capture, ни camera: телефон сам предложит и снять, и взять из
+       галереи — фотографировать бутылку прямо сейчас нужно не всегда. #}
+    <input id="photo" type="file" name="photo" accept="image/*" required>
+    <label class="pickfile" for="photo">
+      <span>📷 Этикетка фотографией</span>
+      <span class="hint">снимите или выберите из галереи</span>
+    </label>
+    <button type="submit" data-go>Распознать</button>
+    <p class="note" data-busy hidden>Читаем этикетку — это занимает несколько секунд.</p>
+  </form>
+  {% endif %}
+</section>
 
 {% if found %}
-  <p class="note">{% if searched %}Нашлось: {{ found|length }}{% else %}В справочнике {{ found|length }} записей{% endif %}</p>
+  <p class="note">Нашлось: {{ found|length }}</p>
   <ul class="cards">
     {% for w in found %}
     <li>
@@ -43,22 +69,8 @@
     </form>
     {% endif %}
   </section>
-{% else %}
-  <p class="note">Справочник пока пуст.</p>
-{% endif %}
-
-{% if photo_available %}
-<section class="card">
-  <h2>Не знаете названия?</h2>
-  <p>Сфотографируйте этикетку — распознаем по фото.</p>
-  <form method="post" action="/whisky/photo" enctype="multipart/form-data" class="form">
-    {# capture=environment открывает камеру сразу, а не галерею #}
-    <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" capture="environment" required>
-    <button type="submit">Распознать</button>
-  </form>
-  <p class="note">До 5 МБ. Данные от модели ориентировочные.</p>
-</section>
 {% endif %}
 
 <p class="note"><a href="/">← на главную</a></p>
+{% if photo_available %}<script src="/static/find.js" defer></script>{% endif %}
 {% endblock %}

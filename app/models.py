@@ -265,6 +265,45 @@ def save_whisky(data: dict, whisky_id: int | None = None, source: str = "manual"
         return whisky_id
 
 
+def whisky_usage(whisky_id: int) -> list[str]:
+    """Названия дегустаций, где этот виски налит или назван в ответе.
+
+    Пустой список означает «запись ни к чему не привязана, удалять безопасно».
+    Смотрим и состав, и ответы: виски могли убрать из состава уже после того,
+    как кто-то его назвал, — такая запись всё равно нужна, иначе в разборе
+    ответов на месте названия окажется дырка.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT t.title FROM tasting t"
+            " WHERE EXISTS (SELECT 1 FROM tasting_whisky tw"
+            "               WHERE tw.tasting_id = t.id AND tw.whisky_id = ?)"
+            "    OR EXISTS (SELECT 1 FROM answer a"
+            "               JOIN participant p ON p.id = a.participant_id"
+            "               WHERE p.tasting_id = t.id AND a.whisky_id = ?)",
+            (whisky_id, whisky_id),
+        ).fetchall()
+    return [row["title"] for row in rows]
+
+
+def delete_whisky(whisky_id: int) -> None:
+    """Убрать запись из справочника.
+
+    Отказываемся, если виски участвует в дегустации: на него ссылаются состав
+    и ответы, внешние ключи стоят на ON DELETE RESTRICT, и без этой проверки
+    человек получил бы вместо объяснения ошибку базы. Прошлый вечер должен
+    оставаться читаемым — итоги считаются из ответов заново.
+    """
+    used = whisky_usage(whisky_id)
+    if used:
+        raise ValueError(
+            "Виски участвует в дегустации (" + ", ".join(used) + ") — удалить нельзя. "
+            "Уберите его из состава, если вечер ещё не начался."
+        )
+    with connect() as conn:
+        conn.execute("DELETE FROM whisky WHERE id = ?", (whisky_id,))
+
+
 def _clean(value):
     if value is None:
         return None

@@ -57,5 +57,25 @@
   <button type="submit">Сохранить</button>
 </form>
 
+<section class="card danger">
+  <h2>Удалить из справочника</h2>
+  {% if used_in %}
+    <p class="note">Нельзя: виски участвует в дегустации
+      — {{ used_in | join(", ") }}. На него ссылаются состав и ответы, а прошлый
+      вечер должен остаться читаемым: итоги считаются из ответов заново.
+      Если вечер ещё не начался, сначала уберите виски из состава.</p>
+  {% else %}
+    <p class="note">Запись ни к одной дегустации не привязана — удалить можно.
+      Отменить нельзя: восстанавливается только из бэкапа
+      (<code>docs/RUNBOOK.md</code>).</p>
+    {# Отдельная форма, а не кнопка внутри правки: промахнуться мимо
+       «Сохранить» и стереть запись не должно быть возможно. #}
+    <form method="post" action="/admin/whiskies/{{ whisky.id }}/delete"
+          onsubmit="return confirm('Удалить «{{ whisky.name }}» из справочника? Отменить будет нельзя.')">
+      <button class="bad" type="submit">Удалить «{{ whisky.name }}»</button>
+    </form>
+  {% endif %}
+</section>
+
 <p class="note"><a href="/admin/whiskies">← ко всему справочнику</a></p>
 {% endblock %}

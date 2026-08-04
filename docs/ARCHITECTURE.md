@@ -85,7 +85,7 @@ app/                 → /opt/str-1/app
 site/                → /var/www/str-1
   healthz            контракт проверки деплоя
   index.html         запасная страница на случай, когда приложение молчит
-  static/            app.css, round.js, board.js, me.js — их отдаёт Caddy, не приложение
+  static/            app.css, find.js, round.js, board.js, me.js — их отдаёт Caddy, не приложение
   robots.txt
 docs/                документация
 tools/               генераторы, на сервер не едут

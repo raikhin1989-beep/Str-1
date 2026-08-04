@@ -60,11 +60,11 @@ def test_yandex_hides_photo_until_it_is_allowed(client, monkeypatch):
     assert ai.supports_images() is False
     page = client.get("/whisky", params={"q": "нет такого"}).text
     assert "Спросить у ИИ" in page
-    assert "Сфотографируйте этикетку" not in page
+    assert "Этикетка фотографией" not in page
 
     monkeypatch.setenv("AI_PHOTO", "on")
     assert ai.supports_images() is True
-    assert "Сфотографируйте этикетку" in client.get("/whisky", params={"q": "нет такого"}).text
+    assert "Этикетка фотографией" in client.get("/whisky", params={"q": "нет такого"}).text
 
 
 def test_photo_appears_by_itself_once_ocr_answers(client, monkeypatch):
@@ -72,12 +72,12 @@ def test_photo_appears_by_itself_once_ocr_answers(client, monkeypatch):
     появилась сама — без секрета, без выката и без нашего участия."""
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1g...")
-    assert "Сфотографируйте этикетку" not in client.get("/whisky", params={"q": "х"}).text
+    assert "Этикетка фотографией" not in client.get("/whisky", params={"q": "х"}).text
 
     monkeypatch.setattr(ai, "_ask_ocr_whether_we_may", lambda: True)
     ai._probe_ocr()
     assert ai.supports_images() is True
-    assert "Сфотографируйте этикетку" in client.get("/whisky", params={"q": "х"}).text
+    assert "Этикетка фотографией" in client.get("/whisky", params={"q": "х"}).text
 
 
 def test_the_switch_beats_the_probe_both_ways(monkeypatch):
@@ -457,3 +457,16 @@ def test_the_probe_sends_a_real_jpeg(monkeypatch):
     assert sent["url"] == ai.YANDEX_OCR_URL
     assert sent["json"]["mimeType"] == "JPEG"
     assert sent["json"]["content"] == ai.OCR_PROBE_JPEG
+
+
+def test_an_unreadable_format_says_what_to_do(monkeypatch):
+    """Из галереи WebP приходит куда чаще, чем с камеры. Этикетку мы читаем
+    как текст, а этот формат OCR не берёт — значит надо сказать прямо,
+    а не выдать общее «не удалось»."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_vision_candidates", lambda: [])
+
+    with pytest.raises(ai.AiUnavailable) as refusal:
+        ai._ask_yandex("что на фото?", image=(b"RIFF", "image/webp"))
+    assert "JPEG или PNG" in str(refusal.value)

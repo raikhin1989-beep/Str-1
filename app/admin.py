@@ -367,13 +367,19 @@ def shuffle(request: Request, tasting_id: int):
 
 
 @router.get("/whiskies", dependencies=[Depends(require_admin)])
-def whiskies_page(request: Request, error: str = "", ok: str = ""):
+def whiskies_page(request: Request, q: str = "", error: str = "", ok: str = ""):
+    # Справочник разросся до полутора сотен записей, и таблица целиком стала
+    # непригодна для правки: нужную строку в ней не найти. Поиск тот же, что
+    # у гостей, — по названию, винокурне и региону.
+    total = len(models.list_whiskies())
     return templates.TemplateResponse(
         request,
         "admin/whiskies.html",
         {
-            "whiskies": models.list_whiskies(),
+            "whiskies": models.search_whiskies(q),
             "classes": models.WHISKY_CLASSES,
+            "query": q,
+            "total": total,
             "error": error,
             "ok": ok,
         },
@@ -420,7 +426,15 @@ def whisky_page(request: Request, whisky_id: int, error: str = "", ok: str = "")
     return templates.TemplateResponse(
         request,
         "admin/whisky.html",
-        {"whisky": whisky, "classes": models.WHISKY_CLASSES, "error": error, "ok": ok},
+        {
+            "whisky": whisky,
+            "classes": models.WHISKY_CLASSES,
+            # Где запись участвует: от этого зависит, можно ли её удалить,
+            # и человеку честнее увидеть причину заранее, а не после нажатия.
+            "used_in": models.whisky_usage(whisky_id),
+            "error": error,
+            "ok": ok,
+        },
     )
 
 
@@ -432,3 +446,20 @@ async def update_whisky(request: Request, whisky_id: int):
     except ValueError as err:
         return _redirect(f"/admin/whiskies/{whisky_id}?error={err}")
     return _redirect(f"/admin/whiskies/{whisky_id}?ok=Сохранено")
+
+
+@router.post("/whiskies/{whisky_id}/delete", dependencies=[Depends(require_admin)])
+def remove_whisky(whisky_id: int):
+    """Убрать запись из справочника.
+
+    Отдельным адресом, а не полем в форме правки: удаление нельзя отменить,
+    и случайно нажать «Сохранить» вместо него не должно быть возможно.
+    """
+    whisky = models.get_whisky(whisky_id)
+    if whisky is None:
+        raise HTTPException(status_code=404, detail="Виски не найден")
+    try:
+        models.delete_whisky(whisky_id)
+    except ValueError as err:
+        return _redirect(f"/admin/whiskies/{whisky_id}?error={quote(str(err))}")
+    return _redirect(f"/admin/whiskies?ok={quote('Удалено: ' + whisky['name'])}")
