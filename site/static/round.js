@@ -67,7 +67,8 @@
         round: form.dataset.round,
         answers: answers(),
         scores: collect('score_'),
-        tags: collect('tags_')
+        tags: collect('tags_'),
+        categories: collect('class_')
       })
     })
       .then(function (response) { return response.json().catch(function () { return {}; }); })

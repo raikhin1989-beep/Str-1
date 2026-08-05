@@ -103,6 +103,18 @@
           {% endfor %}
         </select>
 
+        {# Прямой ответ про класс. Без него частичный балл доставался только
+           тому, кто помнит хоть одно название в этом классе: «это точно
+           островной односолодовый» не стоило ничего. #}
+        <label for="class_{{ no }}">Или хотя бы {{ category_title }}
+          <span class="hint">(даёт балл, даже если название не выбрано)</span></label>
+        <select id="class_{{ no }}" name="class_{{ no }}">
+          <option value="">— не выбрано —</option>
+          {% for value in category_choices %}
+            <option value="{{ value }}" {% if categories.get(no) == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+
         <label for="tags_{{ no }}">
           {% if round == 'palate' %}Каков на вкус{% else %}Чем пахнет{% endif %}
           <span class="hint">(в зачёт не идёт)</span>

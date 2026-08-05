@@ -616,6 +616,7 @@ def save_round_draft(
     answers: dict[int, int | None],
     scores: dict[int, int | None] | None = None,
     tags: dict[int, str] | None = None,
+    categories: dict[int, str] | None = None,
 ) -> None:
     """Сохранить черновик раунда целиком.
 
@@ -652,6 +653,41 @@ def save_round_draft(
             [(participant_id, round_name, no, wid) for no, wid in chosen.items()],
         )
         _save_ratings(conn, participant_id, round_name, valid_samples, scores or {}, tags or {})
+        _save_categories(conn, participant_id, round_name, valid_samples, categories or {})
+
+
+def _save_categories(conn, participant_id, round_name, valid_samples, categories) -> None:
+    """Ответ «а какой это хотя бы класс» — отдельно от названия.
+
+    Он даёт тот же частичный балл, что и виски угаданного класса, и нужен
+    тому, кто уверен в классе, но не помнит ни одной винокурни в нём.
+    Переписываем целиком, как и названия: черновик правят до последнего.
+    """
+    conn.execute(
+        "DELETE FROM answer_category WHERE participant_id = ? AND round = ?",
+        (participant_id, round_name),
+    )
+    rows = [
+        (participant_id, round_name, no, value.strip())
+        for no, value in categories.items()
+        if no in valid_samples and (value or "").strip()
+    ]
+    conn.executemany(
+        "INSERT INTO answer_category (participant_id, round, sample_no, category)"
+        " VALUES (?, ?, ?, ?)",
+        rows,
+    )
+
+
+def get_categories(participant_id: int, round_name: str) -> dict[int, str]:
+    """Что участник назвал классом (или регионом) в этом раунде."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT sample_no, category FROM answer_category"
+            " WHERE participant_id = ? AND round = ?",
+            (participant_id, round_name),
+        ).fetchall()
+    return {int(r["sample_no"]): r["category"] for r in rows}
 
 
 def _save_ratings(conn, participant_id, round_name, valid_samples, scores, tags) -> None:
@@ -775,6 +811,22 @@ def whisky_categories(tasting_id: int, level: str) -> dict[int, str | None]:
     return {row["id"]: row["value"] for row in rows}
 
 
+def category_choices(level: str) -> list[str]:
+    """Из чего гость выбирает класс (или регион) напрямую.
+
+    Классы — фиксированный список из кода. Регионы фиксировать нельзя: их
+    столько, сколько заведено в справочнике, и они меняются вместе с ним, —
+    поэтому собираем из данных.
+    """
+    if level != "region":
+        return list(WHISKY_CLASSES)
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT region FROM whisky WHERE region IS NOT NULL AND region != ''"
+        ).fetchall()
+    return sorted((row["region"] for row in rows), key=str.casefold)
+
+
 def palate_finished_at(tasting_id: int) -> dict[int, str | None]:
     """Когда участник отправил второй раунд — это последний тай-брейк."""
     with connect() as conn:
@@ -803,6 +855,10 @@ def score_tasting(tasting_id: int) -> dict[int, scoring.Score]:
                 "palate": get_answers(person["id"], "palate"),
             },
             categories,
+            {
+                "nose": get_categories(person["id"], "nose"),
+                "palate": get_categories(person["id"], "palate"),
+            },
         )
         for person in list_participants(tasting_id)
     }

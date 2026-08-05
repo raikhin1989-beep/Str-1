@@ -69,14 +69,21 @@ def score_participant(
     truth: dict[int, int],
     answers: dict[str, dict[int, int]],
     categories: dict[int, str | None] | None = None,
+    named_categories: dict[str, dict[int, str]] | None = None,
 ) -> Score:
     """Очки одного участника.
 
-    truth      — что налито: номер образца → id виски;
-    answers    — {"nose": {номер: id}, "palate": {номер: id}}, любой может быть пуст;
-    categories — id виски → категория (класс или регион, выбирает админ).
+    truth            — что налито: номер образца → id виски;
+    answers          — {"nose": {номер: id}, "palate": {номер: id}}, любой может быть пуст;
+    categories       — id виски → категория (класс или регион, выбирает админ);
+    named_categories — что участник назвал классом сам: раунд → номер → категория.
+
+    Частичный балл даётся за одно из двух: названный виски того же класса
+    ИЛИ прямо названный класс. Ровно один балл в любом случае — иначе одно
+    и то же знание оплачивалось бы дважды.
     """
     categories = categories or {}
+    named_categories = named_categories or {}
     score = Score()
     per_sample: dict[int, SampleResult] = {
         sample_no: SampleResult(sample_no=sample_no, truth_id=truth_id)
@@ -85,12 +92,20 @@ def score_participant(
 
     for round_name in ("nose", "palate"):
         given = answers.get(round_name) or {}
-        if given:
+        named = named_categories.get(round_name) or {}
+        if given or named:
             score.answered = True
         hits = 0
         for sample_no, truth_id in truth.items():
             chosen = given.get(sample_no)
             if chosen is None:
+                # Названия нет — но класс мог быть назван прямо. Это и есть
+                # тот случай, ради которого поле появилось: человек уверен
+                # в классе, а винокурню не вспомнит.
+                if _named_category_hit(categories, named, sample_no, truth_id):
+                    result = per_sample[sample_no]
+                    setattr(result, f"{round_name}_points", POINTS_CATEGORY)
+                    score.points_partial += POINTS_CATEGORY
                 continue
             result = per_sample[sample_no]
             setattr(result, f"{round_name}_id", chosen)
@@ -102,9 +117,12 @@ def score_participant(
                     score.points_nose += points
                 else:
                     score.points_palate += points
-            elif _same_category(categories, chosen, truth_id):
+            elif _same_category(categories, chosen, truth_id) or _named_category_hit(
+                categories, named, sample_no, truth_id
+            ):
                 # Частичный балл вместо полного, а не вдобавок к нему:
-                # за образец начисляется что-то одно.
+                # за образец начисляется что-то одно. Два способа его заслужить
+                # тоже не складываются — балл один.
                 setattr(result, f"{round_name}_points", POINTS_CATEGORY)
                 score.points_partial += POINTS_CATEGORY
 
@@ -124,6 +142,17 @@ def score_participant(
 
     score.samples = [per_sample[no] for no in sorted(per_sample)]
     return score
+
+
+def _named_category_hit(
+    categories: dict[int, str | None], named: dict[int, str], sample_no: int, truth_id: int
+) -> bool:
+    """Совпал ли класс, названный участником напрямую, с классом налитого."""
+    claimed = (named.get(sample_no) or "").strip().casefold()
+    if not claimed:
+        return False
+    actual = (categories.get(truth_id) or "").strip().casefold()
+    return bool(actual) and claimed == actual
 
 
 def _same_category(categories: dict[int, str | None], chosen: int, truth_id: int) -> bool:

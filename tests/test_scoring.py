@@ -157,3 +157,51 @@ def test_complete_equality_shares_the_place():
     places = dict(scoring.rank(scores, {1: "12:00", 2: "12:00"}))
     assert places[1] == places[2] == 1
     assert places[3] == 3, "после двух первых идёт третье место, а не второе"
+
+
+# ── прямой ответ про класс ─────────────────────────────────────────────────
+#
+# «В поле нет ввода класса или региона, а за это допбаллы» — с живой
+# дегустации. До сих пор частичный балл доставался только тому, кто помнит
+# хоть одно название в нужном классе: уверенное «это островной односолодовый»
+# не стоило ничего.
+
+NAMED_TRUTH = {1: 10, 2: 20}
+NAMED_CATEGORIES = {10: "односолодовый скотч", 20: "бурбон", 30: "односолодовый скотч"}
+
+
+def test_naming_only_the_class_earns_the_partial_point():
+    score = scoring.score_participant(
+        NAMED_TRUTH, {"nose": {}}, NAMED_CATEGORIES, {"nose": {1: "односолодовый скотч"}}
+    )
+    assert score.points_partial == scoring.POINTS_CATEGORY
+    assert score.answered is True, "человек ответил, пусть и не названием"
+
+
+def test_a_wrong_class_earns_nothing():
+    score = scoring.score_participant(NAMED_TRUTH, {"nose": {}}, NAMED_CATEGORIES, {"nose": {1: "бурбон"}})
+    assert score.points_partial == 0
+
+
+def test_the_class_does_not_pay_twice():
+    """Назвал и виски того же класса, и сам класс — балл всё равно один."""
+    score = scoring.score_participant(
+        NAMED_TRUTH, {"nose": {1: 30}}, NAMED_CATEGORIES, {"nose": {1: "односолодовый скотч"}}
+    )
+    assert score.points_partial == scoring.POINTS_CATEGORY
+
+
+def test_a_correct_name_still_beats_the_class():
+    """Угадал розлив — полный балл, а не частичный вдобавок."""
+    score = scoring.score_participant(
+        NAMED_TRUTH, {"nose": {1: 10}}, NAMED_CATEGORIES, {"nose": {1: "односолодовый скотч"}}
+    )
+    assert score.points_nose == scoring.POINTS_NOSE
+    assert score.points_partial == 0
+
+
+def test_the_class_is_matched_case_insensitively():
+    score = scoring.score_participant(
+        NAMED_TRUTH, {"nose": {}}, NAMED_CATEGORIES, {"nose": {1: "  Односолодовый Скотч "}}
+    )
+    assert score.points_partial == scoring.POINTS_CATEGORY

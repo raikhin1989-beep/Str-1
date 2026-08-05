@@ -417,3 +417,40 @@ def test_a_stray_post_to_the_page_is_not_a_dead_end(client, tasting):
     response = client.post(f"/me/{tasting['tokens'][0]}", follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"].endswith(tasting["tokens"][0])
+
+
+def test_the_guest_can_name_the_class_instead_of_the_whisky(client, tasting):
+    """Сквозняком: поле есть на странице, ответ доходит до базы и даёт балл."""
+    token = tasting["tokens"][0]
+    person = tasting["people"][0]
+
+    page = client.get(f"/me/{token}").text
+    assert 'name="class_1"' in page
+    assert "Или хотя бы класс" in page
+
+    truth = models.tasting_truth(tasting["id"])
+    poured = models.get_whisky(truth[1])
+    response = client.post(
+        f"/me/{token}/submit",
+        data={"round": "nose", "sample_1": "", "class_1": poured["wclass"]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert models.get_categories(person, "nose") == {1: poured["wclass"]}
+
+    score = models.score_tasting(tasting["id"])[person]
+    assert score.points_partial >= 1, "класс назван верно — балл должен быть"
+
+
+def test_a_region_tasting_offers_regions(client):
+    """Список зависит от того, как заведена дегустация."""
+    tasting_id = models.create_tasting("По регионам", None, "region")
+    for row in models.list_whiskies()[:3]:
+        models.add_whisky_to_tasting(tasting_id, row["id"])
+    models.set_status(tasting_id, "registration")
+    token = models.register_participant(tasting_id, "Гость")
+    models.set_status(tasting_id, "round_nose")
+
+    page = client.get(f"/me/{token}").text
+    assert "Или хотя бы регион" in page
+    assert "односолодовый скотч" not in page.split('name="class_1"')[1].split("</select>")[0]

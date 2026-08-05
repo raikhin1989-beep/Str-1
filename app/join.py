@@ -182,6 +182,11 @@ def participant_page(request: Request, token: str, error: str = ""):
             "choice_groups": models.grouped_choices(choices),
             "wide_choice": tasting["answer_scope"] == "catalogue",
             "answers": answers,
+            # Прямой ответ «а какой это хотя бы класс»: даёт тот же частичный
+            # балл и нужен тому, кто уверен в классе, но винокурню не вспомнит.
+            "categories": models.get_categories(participant["id"], round_name),
+            "category_choices": models.category_choices(tasting["category_level"]),
+            "category_title": "регион" if tasting["category_level"] == "region" else "класс",
             "ratings": {no: dict(row) for no, row in ratings.items()},
             "tags": {no: _tags_for(row, round_name) for no, row in ratings.items()},
             "submitted": models.round_submitted(participant["id"], round_name),
@@ -306,6 +311,7 @@ async def save_draft(request: Request, token: str):
             _int_map(payload.get("answers")),
             _int_map(payload.get("scores")),
             _tag_map(payload.get("tags")),
+            _tag_map(payload.get("categories")),
         )
     except ValueError as err:
         return JSONResponse({"ok": False, "error": str(err)}, status_code=400)
@@ -327,6 +333,11 @@ async def submit(request: Request, token: str):
                 int(key[len("tags_"):]): str(value)
                 for key, value in form.items()
                 if key.startswith("tags_")
+            },
+            {
+                int(key[len("class_"):]): str(value)
+                for key, value in form.items()
+                if key.startswith("class_")
             },
         )
         models.submit_round(participant["id"], round_name)
