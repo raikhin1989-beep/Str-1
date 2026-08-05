@@ -60,11 +60,28 @@ def test_before_the_round_the_guest_is_told_to_wait(client, guest):
 
 def test_the_state_endpoint_follows_the_evening(client, guest):
     state = client.get(f"/api/me/{guest['token']}/state").json()
-    assert state == {"status": "registration", "round": None, "submitted": False}
+    assert state == {"status": "registration", "round": None, "submitted": False, "linked": False}
 
     models.set_status(guest["id"], "round_nose")
     state = client.get(f"/api/me/{guest['token']}/state").json()
-    assert state == {"status": "round_nose", "round": "nose", "submitted": False}
+    assert state == {"status": "round_nose", "round": "nose", "submitted": False, "linked": False}
+
+
+def test_the_page_notices_the_telegram_binding_by_itself(client, guest):
+    """Гость уходит к боту, жмёт «Старт» и возвращается. Ответного сообщения
+    от бота не будет — исходящие с этого сервера не проходят, — и сказать
+    «получилось» может только эта страница. Пока привязки не было в опросе,
+    она молчала и продолжала просить сделать уже сделанное."""
+    token = guest["token"]
+    assert client.get(f"/api/me/{token}/state").json()["linked"] is False
+    assert "Остался один шаг" in client.get(f"/me/{token}").text
+
+    models.link_telegram(token, 555, "sasha")
+
+    assert client.get(f"/api/me/{token}/state").json()["linked"] is True
+    page = client.get(f"/me/{token}").text
+    assert "Телеграм привязан" in page
+    assert "Остался один шаг" not in page
 
 
 def test_the_page_carries_the_state_it_was_drawn_with(client, guest):

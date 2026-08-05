@@ -17,7 +17,7 @@
 
   function changed(now) {
     return now.status !== was.status || now.round !== was.round ||
-           now.submitted !== was.submitted;
+           now.submitted !== was.submitted || now.linked !== was.linked;
   }
 
   function poll() {

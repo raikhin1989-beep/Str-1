@@ -296,3 +296,61 @@ def test_admin_counter_follows_the_second_round(admin, tasting):
     page = admin.get(f"/admin/tastings/{tasting['id']}").text
     assert "Раунд по вкусу идёт" in page
     assert "1 из 2" in page
+
+
+# ── кривой запрос — это отказ, а не сбой ───────────────────────────────────
+#
+# Найдено обстрелом после живого теста, где «Internal Server Error» появился
+# на ответе второго участника. Ни один из этих случаев браузер сам не пришлёт,
+# но пятисотка посреди вечера выглядит как сломанный сайт, и разбираться с ней
+# некогда — отвечать надо отказом.
+
+BAD_DRAFTS = [
+    {"answers": {"1": [1]}},                  # TypeError в int()
+    {"answers": "строка"},                    # AttributeError на .items()
+    {"answers": [1, 2]},
+    {"scores": {"1": "9" * 30}},              # OverflowError уже внутри SQLite
+    {"scores": {"1": {"a": 1}}},
+    {"tags": "строка"},
+    {"answers": {"1e999": "1"}},
+]
+
+
+@pytest.mark.parametrize("payload", BAD_DRAFTS)
+def test_a_malformed_draft_is_refused_not_crashed(client, tasting, payload):
+    response = client.post(f"/me/{tasting['tokens'][1]}/draft", json=payload)
+    assert response.status_code == 400, response.text
+    assert response.json()["ok"] is False
+
+
+def test_a_body_that_is_not_json_is_refused(client, tasting):
+    response = client.post(
+        f"/me/{tasting['tokens'][1]}/draft",
+        content=b"{broken",
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 400
+
+
+def test_a_nested_tag_does_not_break_the_draft(client, tasting):
+    """Заметка — это память о вечере, а не данные для зачёта: приводим
+    к строке и сохраняем, вместо того чтобы ронять запрос."""
+    response = client.post(
+        f"/me/{tasting['tokens'][1]}/draft",
+        json={"tags": {"1": {"вложенный": "объект"}}},
+    )
+    assert response.status_code == 200
+
+
+BAD_FORMS = [
+    {"sample_1": "1", "score_1": "9" * 30},
+    {"sample_99999999999999999999999": "1"},
+    {"sample_x": "1"},
+    {"score_1": "не число"},
+]
+
+
+@pytest.mark.parametrize("data", BAD_FORMS)
+def test_a_malformed_submit_is_refused_not_crashed(client, tasting, data):
+    response = client.post(f"/me/{tasting['tokens'][1]}/submit", data=data, follow_redirects=False)
+    assert response.status_code < 500, response.text

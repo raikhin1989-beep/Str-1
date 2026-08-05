@@ -79,6 +79,7 @@ app/                 → /opt/str-1/app
   outbox.py          готовые сообщения для раннера GitHub
   backup.py          копии базы: VACUUM INTO, ротация 14 дней
   limits.py          ограничение частоты на публичных формах
+  errors.py          последние сбои — видны в админке, без SSH
   join.py            регистрация, личная страница, раунды, итоги, экран, вебхук, QR
   migrations/        нумерованные .sql, применяются по порядку
   templates/         Jinja2, админка — в templates/admin/

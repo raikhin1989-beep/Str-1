@@ -8,6 +8,7 @@
 
 import logging
 import os
+import re
 import time
 
 import httpx
@@ -125,21 +126,49 @@ def set_webhook(url: str) -> tuple[bool, str]:
     return bool(body.get("ok")), str(body.get("description", ""))
 
 
+# Код привязки — это join_token: secrets.token_urlsafe(16), то есть 22 символа
+# из латиницы, цифр, «-» и «_». Ограничиваем длину с запасом в обе стороны:
+# так обычная фраза человека не будет принята за код.
+CODE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+
+
 def parse_start_command(update: dict) -> tuple[int, str, str | None] | None:
-    """Вытащить из обновления (chat_id, токен, username), если это /start с токеном.
+    """Вытащить из обновления (chat_id, код, username), если это привязка.
+
+    Принимаем два вида сообщения, и второй — не прихоть:
+
+    * `/start <код>` — так присылает кнопка «Привязать телеграм»;
+    * просто код одним сообщением.
+
+    Кнопка работает не всегда. Если гость уже когда-то запускал этого бота
+    (а на репетициях запускал), телеграм при переходе по ссылке открывает
+    существующий диалог и `/start` с кодом сам не отправляет — человек видит
+    обычный чат, пишет «старт» руками, и привязки не происходит. Именно так
+    оно и повело себя на живом тесте. Поэтому у гостя на странице есть код,
+    который можно просто отправить боту; проверять его нечем, кроме него
+    самого, — но это тот же секрет, что и в кнопке, и в личной ссылке.
 
     Возвращает None на всём остальном: бот отвечает только на привязку.
     """
     message = update.get("message") or {}
     text = (message.get("text") or "").strip()
-    if not text.startswith("/start"):
-        return None
-    parts = text.split(maxsplit=1)
-    if len(parts) != 2 or not parts[1].strip():
+    if text.startswith("/start"):
+        # Что бы ни стояло после /start — это попытка привязаться, и она
+        # должна дойти до журнала как «чужой код», а не потеряться в «мимо».
+        # Иначе диагностика в админке перестаёт отвечать на вопрос «дошло ли».
+        parts = text.split(maxsplit=1)
+        code = parts[1].strip() if len(parts) == 2 else ""
+        if not code:
+            return None
+    elif CODE.match(text):
+        # А вот голое сообщение принимаем за код, только если оно на код
+        # и похоже: иначе любое «привет» уходило бы в привязку.
+        code = text
+    else:
         return None
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
     if chat_id is None:
         return None
     username = (message.get("from") or {}).get("username")
-    return int(chat_id), parts[1].strip(), username
+    return int(chat_id), code, username

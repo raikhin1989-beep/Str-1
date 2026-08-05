@@ -245,14 +245,45 @@ def test_the_admin_page_shows_what_arrived(admin, client, bot):
     assert "Как это читать" in page
 
 
-def test_the_guest_page_warns_against_writing_to_the_bot_directly(client, bot):
+def test_the_guest_page_offers_the_code_when_the_button_fails(client, bot):
+    """Кнопка срабатывает не всегда: если гость уже запускал этого бота,
+    телеграм открывает старый диалог и код сам не отправляет. Тогда код
+    отправляют сообщением — и это работает всегда."""
     code = _open_tasting()
     token = client.post(
         f"/join/{code}", data={"name": "Саша"}, follow_redirects=False
     ).headers["location"].removeprefix("/me/")
     page = client.get(f"/me/{token}").text
-    assert "Открывайте именно эту" in page
-    assert "не сработает" in page
+    assert "Кнопка не помогла?" in page
+    assert token in page, "код должен быть на странице, иначе отправлять нечего"
+
+
+def test_a_bare_code_binds_the_telegram(client, bot):
+    """Ровно тот путь, которым гость спасается, когда кнопка не сработала."""
+    code = _open_tasting()
+    token = client.post(
+        f"/join/{code}", data={"name": "Саша"}, follow_redirects=False
+    ).headers["location"].removeprefix("/me/")
+
+    response = client.post(
+        f"/tg/{SECRET}",
+        json={"message": {"chat": {"id": 42}, "from": {"username": "sasha"}, "text": token}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": SECRET},
+    )
+    assert response.status_code == 200
+    assert models.get_participant_by_token(token)["tg_chat_id"] == 42
+
+
+def test_ordinary_chatter_is_not_mistaken_for_a_code(client, bot):
+    """Иначе любое «привет» уходило бы в привязку."""
+    for text in ("привет", "а что тут вообще", "стартуем?", "/help"):
+        response = client.post(
+            f"/tg/{SECRET}",
+            json={"message": {"chat": {"id": 42}, "text": text}},
+            headers={"X-Telegram-Bot-Api-Secret-Token": SECRET},
+        )
+        assert response.status_code == 200
+        assert bot == [], f"на «{text}» бот привязывать никого не должен"
 
 
 def test_after_the_evening_the_join_link_shows_the_results(client, bot):

@@ -127,6 +127,8 @@ def participant_page(request: Request, token: str, error: str = ""):
         "tasting": tasting,
         "linked": participant["tg_chat_id"] is not None,
         "deep_link": telegram.deep_link(token),
+        # Имя бота нужно и запасному пути «отправьте код сообщением».
+        "bot_name": telegram.known_username(),
         "status_title": models.STATUS_TITLES.get(tasting["status"], tasting["status"]),
         "token": token,
         "my_url": _public_url(request, f"/me/{token}"),
@@ -139,6 +141,7 @@ def participant_page(request: Request, token: str, error: str = ""):
             "submitted": models.round_submitted(participant["id"], round_name)
             if round_name
             else False,
+            "linked": participant["tg_chat_id"] is not None,
         },
         "waiting_for": _waiting_for(tasting["status"]),
         "error": error,
@@ -210,6 +213,13 @@ def participant_state(token: str):
         "status": tasting["status"],
         "round": round_name,
         "submitted": models.round_submitted(participant["id"], round_name) if round_name else False,
+        # Привязку телеграма страница обязана заметить сама. Гость уходит
+        # к боту, жмёт «Старт» и возвращается — а ответного сообщения от бота
+        # не будет: исходящие с этого сервера не проходят. Единственный, кто
+        # может сказать «получилось», — эта страница. Пока привязки здесь
+        # не было, она молчала и продолжала просить сделать то, что уже
+        # сделано; на живом тесте это и выглядело как «привязка не работает».
+        "linked": participant["tg_chat_id"] is not None,
     }
 
 
@@ -247,14 +257,21 @@ async def save_draft(request: Request, token: str):
         limits.check("draft", token)
     except limits.TooOften:
         return JSONResponse({"ok": False, "error": "Слишком часто"}, status_code=429)
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except ValueError:
+        # Тело не разобралось как JSON. Это не сбой приложения — это кривой
+        # запрос, и отвечать на него надо отказом, а не пятисоткой.
+        return JSONResponse({"ok": False, "error": "Не разобрал запрос"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "Не разобрал запрос"}, status_code=400)
     try:
         models.save_round_draft(
             participant["id"],
             round_name,
             _int_map(payload.get("answers")),
             _int_map(payload.get("scores")),
-            {int(k): str(v) for k, v in (payload.get("tags") or {}).items()},
+            _tag_map(payload.get("tags")),
         )
     except ValueError as err:
         return JSONResponse({"ok": False, "error": str(err)}, status_code=400)
@@ -284,10 +301,47 @@ async def submit(request: Request, token: str):
     return RedirectResponse(f"/me/{token}", status_code=303)
 
 
+def _whole(value) -> int:
+    """Целое из чего угодно, что пришло снаружи.
+
+    Всё, что не число, — ValueError: выше он превращается в честный ответ
+    «так нельзя». Раньше сюда прилетали список и слишком длинное число,
+    а int() отвечал на них TypeError и OverflowError — они мимо обработчика
+    и роняли запрос пятисоткой.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError("ожидалось число")
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError) as err:
+        raise ValueError("ожидалось число") from err
+    # SQLite хранит 8 байт со знаком; всё, что больше, роняло вставку
+    # OverflowError уже внутри транзакции.
+    if not -(2**63) <= number < 2**63:
+        raise ValueError("число слишком большое")
+    return number
+
+
+def _tag_map(raw) -> dict[int, str]:
+    if not isinstance(raw, dict):
+        if raw in (None, ""):
+            return {}
+        raise ValueError("ожидался объект")
+    # Значение приводим к строке сами: словарь или список тут не ошибка
+    # запроса, а просто не заметка, и падать из-за него незачем.
+    return {_whole(key): str(value) for key, value in raw.items()}
+
+
 def _int_map(raw) -> dict[int, int | None]:
+    # Тело запроса пишет браузер, но прислать сюда можно что угодно — от
+    # строки до вложенного объекта. Всё непохожее на словарь считаем пустым.
+    if not isinstance(raw, dict):
+        if raw in (None, ""):
+            return {}
+        raise ValueError("ожидался объект")
     result: dict[int, int | None] = {}
-    for key, value in (raw or {}).items():
-        result[int(key)] = None if value in (None, "") else int(value)
+    for key, value in raw.items():
+        result[_whole(key)] = None if value in (None, "") else _whole(value)
     return result
 
 
@@ -297,7 +351,7 @@ def _form_map(form, prefix: str) -> dict[int, int | None]:
         if not key.startswith(prefix):
             continue
         text = str(value).strip()
-        result[int(key[len(prefix):])] = int(text) if text else None
+        result[_whole(key[len(prefix):])] = _whole(text) if text else None
     return result
 
 

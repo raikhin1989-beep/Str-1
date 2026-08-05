@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
-from app import ai, auth, backup, broadcast, models, telegram
+from app import ai, auth, backup, broadcast, errors, models, telegram
 from app.config import admin_password, public_base_url
 from app.db import connect, log_action
 
@@ -364,6 +364,27 @@ def shuffle(request: Request, tasting_id: int):
 
 
 # ── справочник виски ───────────────────────────────────────────────────────
+
+
+@router.get("/errors", dependencies=[Depends(require_admin)])
+def errors_page(request: Request, error: str = "", ok: str = ""):
+    """Последние сбои приложения.
+
+    Полная трасса уходит в журнал службы, но добраться до неё можно только
+    по SSH с ноутбука — то есть не тогда, когда она нужна. Здесь короткая
+    выжимка: что упало, на какой странице и в каком месте кода.
+    """
+    return templates.TemplateResponse(
+        request,
+        "admin/errors.html",
+        {"errors": errors.recent(), "error": error, "ok": ok},
+    )
+
+
+@router.post("/errors/clear", dependencies=[Depends(require_admin)])
+def clear_errors():
+    errors.forget()
+    return _redirect("/admin/errors?ok=" + quote("Список очищен"))
 
 
 @router.get("/whiskies", dependencies=[Depends(require_admin)])

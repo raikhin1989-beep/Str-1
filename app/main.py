@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import ai, telegram
+from app import ai, errors, telegram
 from app.admin import router as admin_router
 from app.config import admin_password
 from app import join as join_module
@@ -147,6 +147,7 @@ async def unhandled_error(request: Request, exc: Exception):
     # Полная трасса — в журнал службы (journalctl -u str-1-app), гостю только
     # человеческая формулировка: подробности ошибки ему всё равно не помогут.
     log.exception("необработанная ошибка на %s", request.url.path)
+    errors.remember(request.url.path, exc)
     if not _wants_html(request):
         return JSONResponse({"detail": "внутренняя ошибка"}, status_code=500)
     return _trouble(request, 500)

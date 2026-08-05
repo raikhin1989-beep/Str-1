@@ -149,3 +149,57 @@ def test_our_own_message_is_kept(client):
     """А наши собственные пояснения, наоборот, доходят как есть."""
     page = client.get("/me/такого-токена-нет", headers={"accept": "text/html"}).text
     assert "Участник не найден" in page
+
+
+# ── сбои видно без SSH ─────────────────────────────────────────────────────
+
+
+def test_a_crash_is_recorded_where_the_host_can_see_it(admin):
+    """Живой тест показал «Internal Server Error», и узнать, что именно упало,
+    было неоткуда: трасса лежит в журнале службы, до которого посреди вечера
+    с телефона не добраться."""
+    from app import errors
+
+    # Настоящее исключение, а не собранное руками: смысл записи — в том,
+    # где именно всё случилось, а трасса появляется только у брошенного.
+    try:
+        int([1])
+    except TypeError as err:
+        errors.remember("/me/abc/draft", err)
+
+    page = admin.get("/admin/errors").text
+    assert "TypeError" in page
+    assert "/me/abc/draft" in page
+    assert "test_ops.py" in page, "должно быть видно место в коде"
+
+
+def test_recording_a_crash_never_crashes(monkeypatch):
+    """Обработчик ошибок — последнее место, где можно падать."""
+    from app import errors
+
+    monkeypatch.setattr(errors, "connect", lambda: 1 / 0)
+    errors.remember("/", ValueError("что угодно"))  # не должно бросить
+
+
+def test_the_errors_page_is_behind_the_login(client):
+    response = client.get("/admin/errors", follow_redirects=False)
+    assert response.status_code == 303
+
+
+def test_the_host_can_clear_the_list(admin):
+    from app import errors
+
+    errors.remember("/", ValueError("раз"))
+    assert errors.recent()
+    admin.post("/admin/errors/clear")
+    assert errors.recent() == []
+
+
+def test_ordinary_refusals_are_not_recorded_as_crashes(client, admin):
+    """404 и «раунд не идёт» — обычные ответы, а не сбои. Иначе список
+    заполнится шумом, и настоящую поломку в нём будет не найти."""
+    from app import errors
+
+    client.get("/me/чужой-токен")
+    client.get("/join/такого-нет")
+    assert errors.recent() == []

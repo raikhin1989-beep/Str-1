@@ -1,0 +1,33 @@
+{% extends "admin/base.html" %}
+
+{% block admin %}
+<h1 class="title">Сбои</h1>
+
+{% if errors %}
+<p class="lead">Последние {{ errors|length }} — свежие сверху.</p>
+<table class="grid">
+  <thead><tr><th>Когда</th><th>Что</th><th>Где</th></tr></thead>
+  <tbody>
+    {% for row in errors %}
+    <tr>
+      <td>{{ row.at }}</td>
+      <td>{{ row.action[6:] }}</td>
+      <td>{{ row.details }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="note swipe">Таблицу можно потянуть вбок — там ещё столбцы.</p>
+<p class="note">Строка читается справа налево: где случилось ← кто позвал.
+  Полная трасса — в журнале службы:
+  <code>journalctl -u str-1-app -n 100 --no-pager</code>.</p>
+
+<form method="post" action="/admin/errors/clear" class="inline">
+  <button class="bad" type="submit">Очистить список</button>
+</form>
+{% else %}
+<p class="lead">Пусто — приложение ни разу не падало.</p>
+<p class="note">Сюда попадают только настоящие сбои: «страница не найдена»
+  и «сейчас раунд не идёт» — это не они, это обычные ответы.</p>
+{% endif %}
+{% endblock %}
