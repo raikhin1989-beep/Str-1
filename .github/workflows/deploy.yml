@@ -54,6 +54,18 @@ on:
       - 'requirements-dev.txt'
       - 'pytest.ini'
       - '.github/workflows/deploy.yml'
+  # Привязка телеграма сама себя подтягивает. Сервер этого сделать не может:
+  # он и есть та сторона, которую телеграм не видит, — а раннер видит обоих.
+  # Раз в пять минут он спрашивает у бота, не написал ли кто, и привозит
+  # сообщения сайту. Репозиторий публичный, минуты Actions бесплатны;
+  # когда писать некому, прогон занимает секунды и ничего не делает.
+  #
+  # Расписание GitHub неточное: обычно несколько минут, иногда дольше. Для
+  # вечера этого хватает — гости привязываются на регистрации, а раунд идёт
+  # дольше. Кому не терпится, тот запускает действие bind руками.
+  schedule:
+    - cron: "*/5 * * * *"
+
   workflow_dispatch:
     inputs:
       action:
@@ -760,28 +772,41 @@ jobs:
   # и привозит сайту — та же дорога, которой уезжают итоги, только в обратную
   # сторону. Обработка на сайте общая с вебхуком: app/telegram_link.py.
   bind:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'bind' }}
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.action == 'bind') }}
     runs-on: ubuntu-latest
+    # Два прогона одновременно сдвинули бы offset друг у друга и могли бы
+    # потерять сообщение. Очередь, а не отмена: терять нечего.
+    concurrency:
+      group: telegram-bind-str-1
+      cancel-in-progress: false
     steps:
       - name: Collect bindings
         env:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           SUBDOMAIN: ${{ secrets.DUCKDNS_SUBDOMAIN }}
+          SOFT: ${{ github.event_name == 'schedule' && 'yes' || 'no' }}
         run: |
           set -e
+          # По расписанию молчим о том, что и так понятно: письмо о падении
+          # раз в пять минут — худшее, что можно сделать с почтой человека.
+          # Руками запустили — говорим честно и падаем.
+          soft="${{ github.event_name == 'schedule' && 'yes' || 'no' }}"
+          give_up() {
+            if [ "$soft" = "yes" ]; then echo "::notice::$1"; exit 0; fi
+            echo "::error::$1"; exit 1
+          }
+
           if [ -z "$TOKEN" ] || [ -z "$SECRET" ] || [ -z "$SUBDOMAIN" ]; then
-            echo "::error::нужны TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET и DUCKDNS_SUBDOMAIN"
-            exit 1
+            give_up "нужны TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET и DUCKDNS_SUBDOMAIN"
           fi
           site="https://$SUBDOMAIN.duckdns.org"
 
           # Вебхук мешает getUpdates: пока он стоит, Bot API отвечает 409.
-          curl -sS --max-time 20 -X POST "https://api.telegram.org/bot$TOKEN/deleteWebhook" > /dev/null
+          curl -sS --max-time 20 -X POST "https://api.telegram.org/bot$TOKEN/deleteWebhook" > /dev/null || true
 
-          curl -fsS --max-time 30 "https://api.telegram.org/bot$TOKEN/getUpdates?timeout=0&allowed_updates=%5B%22message%22%5D" > updates.json || {
-            echo "::error::телеграм не отдал обновления"; exit 1;
-          }
+          curl -fsS --max-time 30 "https://api.telegram.org/bot$TOKEN/getUpdates?timeout=0&allowed_updates=%5B%22message%22%5D" > updates.json \
+            || give_up "телеграм не отдал обновления"
           python3 - <<'PY'
           import json, os, sys, urllib.request
 
@@ -803,8 +828,12 @@ jobs:
               with urllib.request.urlopen(request, timeout=30) as response:
                   report = json.load(response)
           except Exception as err:
-              print(f"::error::сайт не принял обновления: {type(err).__name__}")
-              raise SystemExit(1)
+              # Сайт может быть в перезапуске. По расписанию это не повод
+              # для письма: обновления телеграм подержит и отдаст в следующий
+              # раз — offset мы сдвигаем только после успешной доставки.
+              soft = os.environ.get("SOFT") == "yes"
+              print(f"::{'notice' if soft else 'error'}::сайт не принял обновления: {type(err).__name__}")
+              raise SystemExit(0 if soft else 1)
 
           handled = report.get("handled", [])
           for kind in ("привязка", "чужой код", "мимо"):
