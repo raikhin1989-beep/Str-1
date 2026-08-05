@@ -19,15 +19,49 @@ _ready: set[str] = set()
 _lock = threading.Lock()
 
 
+class _Connection(sqlite3.Connection):
+    """Соединение, которое закрывается вместе с блоком `with`.
+
+    Штатный `with sqlite3.connect(...)` — ловушка, и она нас уже подвела.
+    Он фиксирует транзакцию, но соединение оставляет открытым: закрыть его
+    должен сборщик мусора, когда до переменной дойдут руки. Пока запросов
+    мало, это незаметно; когда за столом несколько телефонов опрашивают
+    сервер раз в три секунды, дескрипторы копятся быстрее, чем убираются.
+
+    Чем это кончилось 5 августа: у процесса кончились файловые дескрипторы,
+    и приложение перестало открывать что бы то ни было — базу, сокет
+    к Yandex OCR, даже шаблон страницы ошибки. Снаружи это выглядело как
+    «отказала база»: `unable to open database file`, а следом голое
+    «Internal Server Error» вместо оформленной страницы, потому что и её
+    файл прочитать было нечем.
+
+    Поэтому закрываем сами. Так все 39 мест вида `with connect() as conn:`
+    остаются как есть и при этом перестают течь.
+    """
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
 def connect() -> sqlite3.Connection:
-    """Соединение с готовой схемой."""
+    """Соединение с готовой схемой.
+
+    Закрывается само при выходе из `with`. Если берёте его без `with` —
+    закрывайте руками, как это делает app/backup.py.
+    """
     path = db_path()
     _ensure_schema(path)
     return _open(path)
 
 
-def _open(path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(path, timeout=10)
+def _open(path: Path, autoclose: bool = True) -> sqlite3.Connection:
+    # autoclose=False — для накатывания миграций: там одно соединение живёт
+    # через несколько `with` подряд (по одному на миграцию), и закрываться
+    # после первой же оно не должно. Жизненным циклом там управляют руками.
+    conn = sqlite3.connect(path, timeout=10, factory=_Connection if autoclose else sqlite3.Connection)
     conn.row_factory = sqlite3.Row
     # WAL — чтобы чтение не блокировалось записью; foreign_keys в SQLite
     # выключены по умолчанию и включаются на каждое соединение отдельно.
@@ -44,7 +78,7 @@ def _ensure_schema(path: Path) -> None:
         if key in _ready:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = _open(path)
+        conn = _open(path, autoclose=False)
         try:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS schema_migrations ("

@@ -384,6 +384,12 @@ jobs:
             ExecStart=$APP_ROOT/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port $APP_PORT --proxy-headers --forwarded-allow-ips 127.0.0.1
             Restart=always
             RestartSec=3
+            # Запас по дескрипторам — вторая линия обороны. Утечку соединений
+            # мы закрыли (app/db.py), но 5 августа вечер лёг именно из-за
+            # упёршегося лимита: процесс перестал открывать что бы то ни было,
+            # включая шаблон страницы ошибки. Пусть следующая медленная течь
+            # даст время заметить себя, а не уронит вечер.
+            LimitNOFILE=65535
             NoNewPrivileges=yes
             PrivateTmp=yes
             ProtectSystem=full

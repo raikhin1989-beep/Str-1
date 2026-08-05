@@ -203,3 +203,63 @@ def test_ordinary_refusals_are_not_recorded_as_crashes(client, admin):
     client.get("/me/чужой-токен")
     client.get("/join/такого-нет")
     assert errors.recent() == []
+
+
+# ── соединения с базой не должны копиться ──────────────────────────────────
+
+
+def test_a_request_does_not_leak_a_database_connection(client):
+    """Ровно то, что положило сайт 5 августа.
+
+    `with sqlite3.connect(...)` фиксирует транзакцию, но соединение
+    оставляет открытым — закрыть его должен сборщик мусора. Пока запросов
+    мало, это незаметно; когда за столом несколько телефонов опрашивают
+    сервер раз в три секунды, дескрипторы копятся быстрее, чем убираются.
+    Кончилось тем, что процесс не мог открыть уже ничего: ни базу
+    (`unable to open database file`), ни сокет, ни даже шаблон страницы
+    ошибки — и вместо неё отдавалось голое «Internal Server Error».
+    """
+    import os
+
+    from app import models
+
+    def open_files() -> int:
+        return len(os.listdir("/proc/self/fd"))
+
+    models.list_whiskies()          # схема накатана, кэши прогреты
+    before = open_files()
+    for _ in range(200):
+        models.list_whiskies()
+    assert open_files() <= before + 5, "соединения не закрываются"
+
+
+def test_a_failing_query_does_not_leak_either(client):
+    """Исключение держит кадр стека, а кадр — соединение. Раньше это
+    раскручивало поломку: чем хуже становилось, тем быстрее текло."""
+    import os
+    import sqlite3
+
+    from app.db import connect
+
+    def open_files() -> int:
+        return len(os.listdir("/proc/self/fd"))
+
+    before = open_files()
+    kept = []
+    for _ in range(200):
+        try:
+            with connect() as conn:
+                conn.execute("SELECT * FROM no_such_table")
+        except sqlite3.Error as err:
+            kept.append(err)        # держим исключение, как это делает трасса
+    assert open_files() <= before + 5, "упавший запрос не закрывает соединение"
+
+
+def test_migrations_still_run_on_one_connection(tmp_path, monkeypatch):
+    """Закрытие по `with` не должно ломать накатывание схемы: там одно
+    соединение живёт через несколько `with` подряд, по одному на миграцию."""
+    from app import db, models
+
+    monkeypatch.setenv("STR1_DB_PATH", str(tmp_path / "fresh.db"))
+    db.reset_schema_cache()
+    assert len(models.list_whiskies()) > 100, "справочник должен накатиться целиком"
