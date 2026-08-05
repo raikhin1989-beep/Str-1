@@ -11,6 +11,12 @@ SECRET = "test-webhook-secret-0123456789"
 def bot(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:тест")
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", SECRET)
+    # В сеть не ходим: с сервера она всё равно не работает, а тесту незачем.
+    from app import telegram
+
+    sent = []
+    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)) or True)
+    return sent
 
 
 @pytest.fixture
@@ -72,3 +78,81 @@ def test_an_unfinished_evening_has_nothing_to_send(client):
 def test_without_a_bot_secret_the_path_does_not_exist(client, finished, monkeypatch):
     monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
     assert client.get(f"/internal/outbox/{SECRET}").status_code == 404
+
+
+# ── привязка через раннер ──────────────────────────────────────────────────
+#
+# Телеграм не может доставить вебхук на этот сервер: getWebhookInfo ответил
+# `Connection timed out`. Про исходящие это знали давно, про входящие ошибочно
+# считали, что они идут, — и на этом держалась вся привязка. Теперь сообщения
+# бота привозит раннер, тем же мостом, которым уезжают итоги.
+
+
+def _guest(name: str = "Саша"):
+    tasting_id = models.create_tasting("Вечер", None, "class")
+    models.set_status(tasting_id, "registration")
+    return tasting_id, models.register_participant(tasting_id, name)
+
+
+def test_the_runner_can_deliver_a_binding(client, bot):
+    tasting_id, token = _guest()
+    response = client.post(
+        f"/internal/outbox/{SECRET}/updates",
+        json={"updates": [
+            {"update_id": 1,
+             "message": {"chat": {"id": 77}, "from": {"username": "sasha"},
+                         "text": f"/start {token}"}},
+        ]},
+    )
+    assert response.status_code == 200
+    assert response.json()["handled"] == ["привязка"]
+    assert models.get_participant_by_token(token)["tg_chat_id"] == 77
+
+
+def test_a_bare_code_works_through_the_runner_too(client, bot):
+    """Кнопка открывает старый диалог и код не отправляет — тогда его шлют
+    сообщением. Обе дороги должны доезжать одинаково."""
+    tasting_id, token = _guest()
+    client.post(
+        f"/internal/outbox/{SECRET}/updates",
+        json={"updates": [{"update_id": 2, "message": {"chat": {"id": 88}, "text": token}}]},
+    )
+    assert models.get_participant_by_token(token)["tg_chat_id"] == 88
+
+
+def test_the_report_says_what_happened_to_each_message(client, bot):
+    """Ответ раннеру — это и есть журнал на странице «Телеграм»."""
+    tasting_id, token = _guest()
+    report = client.post(
+        f"/internal/outbox/{SECRET}/updates",
+        json={"updates": [
+            {"update_id": 1, "message": {"chat": {"id": 1}, "text": f"/start {token}"}},
+            {"update_id": 2, "message": {"chat": {"id": 2}, "text": "/start"}},
+            {"update_id": 3, "message": {"chat": {"id": 3}, "text": "/start кодкоторогонет"}},
+            {"update_id": 4, "message": {"chat": {"id": 4}, "text": "привет"}},
+        ]},
+    ).json()
+    assert report["handled"] == ["привязка", "мимо", "чужой код", "мимо"]
+
+
+def test_updates_need_the_secret(client):
+    assert client.post("/internal/outbox/чужой-секрет/updates", json={"updates": []}).status_code == 404
+
+
+def test_both_roads_share_one_rule(client, bot):
+    """Вебхук и раннер обязаны связывать одинаково: если сеть когда-нибудь
+    откроется, поведение не должно разъехаться."""
+    from app import telegram_link
+
+    _, first = _guest("Через вебхук")
+    _, second = _guest("Через раннер")
+
+    client.post(
+        f"/tg/{SECRET}",
+        json={"message": {"chat": {"id": 101}, "text": f"/start {first}"}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": SECRET},
+    )
+    telegram_link.apply({"message": {"chat": {"id": 202}, "text": f"/start {second}"}})
+
+    assert models.get_participant_by_token(first)["tg_chat_id"] == 101
+    assert models.get_participant_by_token(second)["tg_chat_id"] == 202

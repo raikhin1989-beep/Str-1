@@ -59,7 +59,7 @@ on:
       action:
         description: "Что сделать на сервере"
         type: choice
-        options: [deploy, inspect, broadcast, telegram]
+        options: [deploy, inspect, bind, broadcast, telegram]
         default: deploy
 
 concurrency:
@@ -730,27 +730,97 @@ jobs:
             echo "http://$SITE_DOMAIN/ -> $code (ожидается 301)"
             echo "сайт доступен: https://$SITE_DOMAIN/"
 
-            # Вебхук прописываем отсюда, а не из приложения: адрес знает только
-            # деплой, и переустанавливать его на каждом старте службы незачем.
+            # Вебхук НЕ регистрируем — и это не упущение.
+            #
+            # 5 августа getWebhookInfo ответил `Connection timed out`: вебхук
+            # стоял, а доставить по нему телеграм не мог. Блокировка между
+            # этим сервером и api.telegram.org двусторонняя; про исходящие
+            # это знали, про входящие ошибочно считали, что они идут.
+            #
+            # Пока вебхук зарегистрирован, Bot API не отдаёт getUpdates, —
+            # поэтому его надо именно снять, иначе привязка через раннер
+            # (действие bind) упрётся в 409.
             if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_WEBHOOK_SECRET" ]; then
-              # Телеграм принимает в секрете только эти символы; кириллица
-              # в HTTP-заголовок не поместится, и вебхук молча не заработает.
               case "$TELEGRAM_WEBHOOK_SECRET" in
                 *[!A-Za-z0-9_-]*)
-                  echo "::error::TELEGRAM_WEBHOOK_SECRET содержит недопустимые символы — телеграм принимает только латиницу, цифры, _ и -"
+                  echo "::error::TELEGRAM_WEBHOOK_SECRET содержит недопустимые символы — латиница, цифры, _ и -"
                   exit 1 ;;
               esac
-              hook="https://$SITE_DOMAIN/tg/$TELEGRAM_WEBHOOK_SECRET"
-              resp=$(curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
-                       -H 'Content-Type: application/json' \
-                       -d "{\"url\": \"$hook\", \"secret_token\": \"$TELEGRAM_WEBHOOK_SECRET\", \"allowed_updates\": [\"message\"], \"drop_pending_updates\": true}")
-              # В ответе может быть сам адрес с секретом — печатаем только вердикт.
+              resp=$(curl -sS --max-time 20 -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook")
               case "$resp" in
-                *'"ok":true'*) echo "вебхук бота прописан" ;;
-                *) echo "::error::телеграм не принял вебхук"; exit 1 ;;
+                *'"ok":true'*) echo "вебхук снят — привязку возит раннер (действие bind)" ;;
+                *) echo "::warning::не удалось снять вебхук, привязка через bind может не работать" ;;
               esac
             fi
           fi
+
+  # ── BIND: привязать телеграм участникам ────────────────────────────────────
+  # Телеграм не может доставить вебхук на этот сервер (Connection timed out,
+  # проверено getWebhookInfo). Поэтому сообщения бота забирает отсюда раннер
+  # и привозит сайту — та же дорога, которой уезжают итоги, только в обратную
+  # сторону. Обработка на сайте общая с вебхуком: app/telegram_link.py.
+  bind:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'bind' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect bindings
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          SUBDOMAIN: ${{ secrets.DUCKDNS_SUBDOMAIN }}
+        run: |
+          set -e
+          if [ -z "$TOKEN" ] || [ -z "$SECRET" ] || [ -z "$SUBDOMAIN" ]; then
+            echo "::error::нужны TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET и DUCKDNS_SUBDOMAIN"
+            exit 1
+          fi
+          site="https://$SUBDOMAIN.duckdns.org"
+
+          # Вебхук мешает getUpdates: пока он стоит, Bot API отвечает 409.
+          curl -sS --max-time 20 -X POST "https://api.telegram.org/bot$TOKEN/deleteWebhook" > /dev/null
+
+          curl -fsS --max-time 30 "https://api.telegram.org/bot$TOKEN/getUpdates?timeout=0&allowed_updates=%5B%22message%22%5D" > updates.json || {
+            echo "::error::телеграм не отдал обновления"; exit 1;
+          }
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+
+          data = json.load(open("updates.json"))
+          updates = data.get("result", [])
+          print(f"пришло сообщений: {len(updates)}", file=sys.stderr)
+          if not updates:
+              print("::notice::новых сообщений боту нет — привязывать нечего")
+              raise SystemExit(0)
+
+          site, secret = os.environ["SUBDOMAIN"], os.environ["SECRET"]
+          url = f"https://{site}.duckdns.org/internal/outbox/{secret}/updates"
+          request = urllib.request.Request(
+              url,
+              data=json.dumps({"updates": updates}).encode(),
+              headers={"Content-Type": "application/json"},
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  report = json.load(response)
+          except Exception as err:
+              print(f"::error::сайт не принял обновления: {type(err).__name__}")
+              raise SystemExit(1)
+
+          handled = report.get("handled", [])
+          for kind in ("привязка", "чужой код", "мимо"):
+              count = handled.count(kind)
+              if count:
+                  print(f"{kind}: {count}")
+          # Сдвигаем offset: телеграм считает эти обновления доставленными
+          # и второй раз их не пришлёт.
+          last = max(u["update_id"] for u in updates)
+          token = os.environ["TOKEN"]
+          urllib.request.urlopen(
+              f"https://api.telegram.org/bot{token}/getUpdates?offset={last + 1}&timeout=0",
+              timeout=30,
+          ).read()
+          print(f"::notice::привязано: {handled.count('привязка')}")
+          PY
 
   # ── BROADCAST: развезти итоги в телеграм ───────────────────────────────────
   # Существует потому, что с сервера исходящие к api.telegram.org не проходят

@@ -11,9 +11,8 @@ from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from app import auth, limits, models, scoring, telegram
+from app import auth, limits, models, scoring, telegram, telegram_link
 from app.config import public_base_url
-from app.db import connect, log_action
 
 log = logging.getLogger("str1.join")
 
@@ -79,7 +78,7 @@ def join(request: Request, code: str, name: str = Form(""), contact: str = Form(
     if known and known[0]["tasting_id"] != tasting["id"]:
         new_id = models.get_participant_by_token(token)["id"]
         if models.carry_over_telegram(known[0]["id"], new_id):
-            _tg_log("перенос", f"{name}: телеграм с прошлой дегустации")
+            telegram_link.note("перенос", f"{name}: телеграм с прошлой дегустации")
 
     return _remember(RedirectResponse(f"/me/{token}", status_code=303), request, token)
 
@@ -493,27 +492,6 @@ def qr(data: str):
     )
 
 
-def _describe(update: dict) -> str:
-    """Коротко, что пришло, — без пересказа чужой переписки.
-
-    В журнал попадает только вид сообщения и первое слово команды: этого
-    хватает, чтобы понять «нажали Старт без кода», и не хватает, чтобы
-    прочитать, о чём человек писал боту.
-    """
-    message = update.get("message") or {}
-    text = (message.get("text") or "").strip()
-    if not text:
-        return "сообщение без текста"
-    if text.startswith("/start"):
-        return "Старт без кода" if len(text.split()) < 2 else "Старт с кодом"
-    return "не команда Старт"
-
-
-def _tg_log(action: str, details: str) -> None:
-    with connect() as conn:
-        log_action(conn, None, f"tg.{action}", details[:200])
-
-
 @router.post("/tg/{secret}")
 async def telegram_webhook(
     request: Request,
@@ -528,37 +506,11 @@ async def telegram_webhook(
     """
     expected = telegram.webhook_secret()
     if not expected or secret != expected or x_telegram_bot_api_secret_token != expected:
-        _tg_log("отказ", "секрет не совпал")
+        telegram_link.note("отказ", "секрет не совпал")
         raise HTTPException(status_code=404, detail="Not Found")
 
-    update = await request.json()
-    parsed = telegram.parse_start_command(update)
-    if parsed is None:
-        # Не привязка — молча соглашаемся: телеграм повторяет обновления,
-        # на которые ответили ошибкой. Но в журнал пишем: «нажал Старт без
-        # кода» — самая частая причина, по которой привязка «не работает».
-        _tg_log("мимо", _describe(update))
-        return {"ok": True}
-
-    chat_id, token, username = parsed
-    participant = models.link_telegram(token, chat_id, username)
-    _tg_log(
-        "привязка" if participant else "чужой код",
-        f"{participant['name'] if participant else 'код ' + token[:6] + '…'}"
-        f"{', @' + username if username else ''}",
-    )
-    if participant is None:
-        telegram.send_message(
-            chat_id,
-            "Не нашёл, к кому вас привязать. Откройте ссылку регистрации ещё раз "
-            "и нажмите кнопку «Привязать телеграм».",
-        )
-        return {"ok": True}
-
-    tasting = models.get_tasting(participant["tasting_id"])
-    telegram.send_message(
-        chat_id,
-        f"Готово, {participant['name']}! Пришлю сюда итоги дегустации "
-        f"«{tasting['title']}».",
-    )
+    # Разбор и связывание — общие с тем путём, которым обновления привозит
+    # раннер (app/telegram_link.py). Здесь остаётся только проверка секрета:
+    # сюда может постучаться кто угодно.
+    telegram_link.apply(await request.json())
     return {"ok": True}
