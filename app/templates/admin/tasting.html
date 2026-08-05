@@ -93,6 +93,14 @@
       не срабатывает.{% endif %}
       {% if not editable %}Менять поздно — раунды начались.{% endif %}</p>
 
+    {% if without_category %}
+    <p class="msg msg-bad" style="margin-top:.8rem">У этих виски
+      не заполнен {{ category_title }}: <strong>{{ without_category | join(", ") }}</strong>.
+      Частичный балл считается именно по нему — пока поле пустое, верный ответ
+      гостя не стоит ничего, а в итогах будут просто нули. Заполните его
+      на странице виски или выберите другую гранулярность.</p>
+    {% endif %}
+
     <button type="submit">Сохранить</button>
   </form>
 </section>
@@ -105,6 +113,17 @@
   <img class="qr" src="/qr.svg?data={{ join_url | urlencode }}" alt="QR-код регистрации" width="280" height="280">
   <p class="note" style="margin-top:.5rem">Не читается — увеличьте яркость экрана
     или пришлите ссылку сообщением: она выше и работает так же.</p>
+  {% if fallback_urls %}
+  {# Поймано на живой дегустации: у гостя с включённым VPN страница не
+     открылась вовсе. Домен у нас на duckdns.org, а этот суффикс многие VPN
+     и блокировщики режут целиком — имя не резолвится ещё до нас, и чинить
+     со своей стороны нечего. Запасной вход от домена не зависит. #}
+  <p class="note"><strong>У гостя не открывается?</strong> Скорее всего у него
+    включён VPN или блокировщик: адреса на <code>duckdns.org</code> они часто
+    режут целиком. Пусть выключит его на вечер — или откроет запасной адрес,
+    он мимо домена: <a href="{{ fallback_urls.join }}">{{ fallback_urls.join }}</a>.
+    Он без шифрования, поэтому основной всё-таки лучше.</p>
+  {% endif %}
   {% if tasting.status != 'registration' %}
     <p class="note">Сейчас по ней записаться нельзя: регистрация открыта только
       в состоянии «регистрация».</p>
@@ -170,7 +189,7 @@
   <h2>Итоги</h2>
   {% if board %}
   <table class="grid">
-    <thead><tr><th>№</th><th>Кто</th><th>Итого</th><th>Нос</th><th>Вкус</th><th>Класс</th><th>Бонус</th></tr></thead>
+    <thead><tr><th>№</th><th>Кто</th><th>Итого</th><th>Нос</th><th>Вкус</th><th>{{ category_title|capitalize }}</th><th>Бонус</th></tr></thead>
     <tbody>
       {% for row in board %}
       <tr>
@@ -191,6 +210,12 @@
 
   <p><a href="{{ results_url }}">Страница итогов для гостей</a> ·
      <a href="{{ board_url }}">экран для проектора</a></p>
+  {% if fallback_urls %}
+  <p class="note" style="margin-top:-.4rem">Если у кого-то итоги не открылись —
+    почти наверняка VPN или блокировщик режет <code>duckdns.org</code>. Запасной
+    адрес мимо домена:
+    <a href="{{ fallback_urls.results }}">{{ fallback_urls.results }}</a>.</p>
+  {% endif %}
 
   <form method="post" action="/admin/tastings/{{ tasting.id }}/recount" class="inline">
     <button type="submit">Пересчитать</button>

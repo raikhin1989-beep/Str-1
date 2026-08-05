@@ -34,7 +34,7 @@
 <section class="card">
   <h2>Ваш результат: {{ result.total }} из {{ max_points }}</h2>
   <p>Место {{ result.place }}. Нос {{ result.points_nose }}, вкус {{ result.points_palate }},
-     за класс {{ result.points_partial }}, бонусы {{ result.points_bonus }}.</p>
+     за {{ category_title }} {{ result.points_partial }}, бонусы {{ result.points_bonus }}.</p>
 
   <table class="grid">
     <thead><tr><th>№</th><th>Что было</th><th>Ваш нос</th><th>Ваш вкус</th><th>Баллы</th></tr></thead>
@@ -123,9 +123,9 @@
                placeholder="{% if round == 'palate' %}сладкий, перец, долгое послевкусие{% else %}торф, ваниль, сухофрукты{% endif %}"
                value="{{ tags.get(no, '') }}">
 
-        <label for="score_{{ no }}">Насколько нравится: <output for="score_{{ no }}" id="out_{{ no }}">{{ ratings.get(no, {}).get('score') if ratings.get(no, {}).get('score') is not none else '—' }}</output></label>
+        <label for="score_{{ no }}">Насколько нравится: <output for="score_{{ no }}" id="out_{{ no }}">{{ scores.get(no, '—') }}</output></label>
         <input id="score_{{ no }}" name="score_{{ no }}" type="range" min="0" max="100" step="5"
-               value="{{ ratings.get(no, {}).get('score') if ratings.get(no, {}).get('score') is not none else 50 }}"
+               value="{{ scores.get(no, 50) }}"
                oninput="document.getElementById('out_{{ no }}').value = this.value">
       </fieldset>
       {% endfor %}

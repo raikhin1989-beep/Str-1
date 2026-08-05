@@ -155,6 +155,9 @@ def participant_page(request: Request, token: str, error: str = ""):
             "linked": participant["tg_chat_id"] is not None,
         },
         "waiting_for": _waiting_for(tasting["status"]),
+        # «за класс» на дегустации по регионам — враньё в глаза. Подпись
+        # везде идёт от того, как заведена дегустация.
+        "category_title": _category_title(tasting),
         "error": error,
     }
     if tasting["status"] in models.RESULT_STATUSES:
@@ -185,8 +188,10 @@ def participant_page(request: Request, token: str, error: str = ""):
             # балл и нужен тому, кто уверен в классе, но винокурню не вспомнит.
             "categories": models.get_categories(participant["id"], round_name),
             "category_choices": models.category_choices(tasting["category_level"]),
-            "category_title": "регион" if tasting["category_level"] == "region" else "класс",
-            "ratings": {no: dict(row) for no, row in ratings.items()},
+            # Оценка своя на каждый раунд: попробовав, человек часто меняет
+            # мнение, и показывать ему в раунде вкуса то, что он поставил
+            # по запаху, — значит и сбивать, и подсказывать.
+            "scores": models.get_scores(participant["id"], round_name),
             "tags": {no: _tags_for(row, round_name) for no, row in ratings.items()},
             "submitted": models.round_submitted(participant["id"], round_name),
         }
@@ -237,6 +242,10 @@ def participant_state(token: str):
         # сделано; на живом тесте это и выглядело как «привязка не работает».
         "linked": participant["tg_chat_id"] is not None,
     }
+
+
+def _category_title(tasting) -> str:
+    return "регион" if tasting["category_level"] == "region" else "класс"
 
 
 def _tags_for(rating, round_name: str) -> str:
@@ -417,6 +426,7 @@ def results_page(request: Request, code: str):
             "samples": models.sample_breakdown(tasting["id"]) if ready else [],
             "best": models.whisky_of_the_night(tasting["id"]) if ready else None,
             "max_points": scoring.max_points(len(models.sample_numbers(tasting["id"]))),
+            "category_title": _category_title(tasting),
             "code": code,
         },
     )

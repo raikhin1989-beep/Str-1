@@ -454,3 +454,179 @@ def test_a_region_tasting_offers_regions(client):
     page = client.get(f"/me/{token}").text
     assert "Или хотя бы регион" in page
     assert "односолодовый скотч" not in page.split('name="class_1"')[1].split("</select>")[0]
+
+
+# ── ответ одними классами ──────────────────────────────────────────────────
+#
+# Живая дегустация по регионам: гость выбирал только регион, названия не
+# трогал. Баллы считались верно, а весь учёт вечера смотрел в одну таблицу
+# answer — где у такого гостя ни строки. Отсюда «сдали 0 из 2» в админке,
+# прочерки в колонках и форма, показанная заново после «Отправить».
+
+
+@pytest.fixture
+def regions():
+    """Дегустация по регионам: три образца одного региона, два гостя."""
+    tasting_id = models.create_tasting("По регионам", None, "region")
+    ids = [
+        models.save_whisky({"name": name, "wclass": "односолодовый скотч", "region": "Speyside"})
+        for name in ("Aberlour Suthainn", "The Dalmore The Quartet", "Glenfarclas 15")
+    ]
+    for whisky_id in ids:
+        models.add_whisky_to_tasting(tasting_id, whisky_id)
+    models.set_status(tasting_id, "registration")
+    tokens = [models.register_participant(tasting_id, name) for name in ("Саша", "Женя")]
+    models.set_status(tasting_id, "round_nose")
+    return {
+        "id": tasting_id,
+        "whiskies": ids,
+        "tokens": tokens,
+        "people": [models.get_participant_by_token(t)["id"] for t in tokens],
+    }
+
+
+def test_an_answer_of_categories_only_can_be_submitted(regions):
+    me = regions["people"][0]
+    models.save_round_draft(me, "nose", {}, categories={n: "Speyside" for n in (1, 2, 3)})
+    models.submit_round(me, "nose")
+    assert models.round_submitted(me, "nose") is True
+
+
+def test_names_and_categories_count_together_towards_completeness(regions):
+    """Половина образцов названа, половина — только регионом: это полный ответ."""
+    me = regions["people"][0]
+    models.save_round_draft(
+        me,
+        "nose",
+        {1: regions["whiskies"][0]},
+        categories={2: "Speyside", 3: "Speyside"},
+    )
+    models.submit_round(me, "nose")
+    assert models.round_submitted(me, "nose") is True
+
+
+def test_a_categories_only_answer_shows_up_in_the_admin(regions):
+    first, second = regions["people"]
+    models.save_round_draft(first, "nose", {}, categories={n: "Speyside" for n in (1, 2, 3)})
+    models.submit_round(first, "nose")
+    models.save_round_draft(second, "nose", {}, categories={1: "Speyside"})
+
+    assert models.round_progress(regions["id"], "nose") == (1, 2)
+    status = models.answer_status(regions["id"])
+    assert status[first]["nose"] == "отправлен"
+    assert status[second]["nose"] == "черновик"
+
+
+def test_closing_the_round_freezes_a_categories_only_draft(regions):
+    """Забытая кнопка «Отправить» не должна стоить человеку раунда."""
+    me = regions["people"][0]
+    models.save_round_draft(me, "nose", {}, categories={n: "Speyside" for n in (1, 2, 3)})
+    models.set_status(regions["id"], "round_palate")
+    assert models.round_submitted(me, "nose") is True
+    assert models.answer_status(regions["id"])[me]["nose"] == "отправлен"
+
+
+def test_the_page_says_the_answer_is_accepted(client, regions):
+    token = regions["tokens"][0]
+    response = client.post(
+        f"/me/{token}/submit",
+        data={"round": "nose"} | {f"class_{n}": "Speyside" for n in (1, 2, 3)},
+        follow_redirects=True,
+    )
+    assert "Ответ принят" in response.text
+    assert "Отправить ответ" not in response.text
+
+
+def test_the_region_tasting_says_region_everywhere(admin, client, regions):
+    """«За класс» на дегустации по регионам — враньё в глаза."""
+    for token in regions["tokens"]:
+        client.post(
+            f"/me/{token}/submit",
+            data={"round": "nose"} | {f"class_{n}": "Speyside" for n in (1, 2, 3)},
+            follow_redirects=True,
+        )
+    models.set_status(regions["id"], "round_palate")
+    for token in regions["tokens"]:
+        client.post(
+            f"/me/{token}/submit",
+            data={"round": "palate"} | {f"class_{n}": "Speyside" for n in (1, 2, 3)},
+            follow_redirects=True,
+        )
+    # Через админку, а не моделью: таблицу итогов заполняет переход статуса
+    # именно там, а нам нужен и личный результат гостя.
+    admin.post(
+        f"/admin/tastings/{regions['id']}/status",
+        data={"status": "scoring"},
+        follow_redirects=True,
+    )
+    code = models.get_tasting(regions["id"])["public_code"]
+
+    assert "<th>Регион</th>" in client.get(f"/results/{code}").text
+    assert "за регион" in client.get(f"/me/{regions['tokens'][0]}").text
+    assert "<th>Регион</th>" in admin.get(f"/admin/tastings/{regions['id']}").text
+
+
+def test_a_correct_region_is_worth_a_point(regions):
+    """Тот же вечер целиком: гость отвечал одними регионами и не остался с нулём."""
+    me = regions["people"][0]
+    models.save_round_draft(me, "nose", {}, categories={n: "Speyside" for n in (1, 2, 3)})
+    models.submit_round(me, "nose")
+    assert models.score_tasting(regions["id"])[me].points_partial == 3
+
+
+def test_the_admin_warns_about_whiskies_without_a_region(admin, regions):
+    """Пустое поле в справочнике превращает верный ответ в ноль — молча."""
+    assert "не заполнен" not in admin.get(f"/admin/tastings/{regions['id']}").text
+
+    blank = models.create_tasting("Ещё по регионам", None, "region")
+    models.add_whisky_to_tasting(blank, models.save_whisky({"name": "Безымянный край"}))
+    page = admin.get(f"/admin/tastings/{blank}").text
+    assert "не заполнен регион" in page
+    assert "Безымянный край" in page
+
+
+# ── бегунок «насколько нравится» ───────────────────────────────────────────
+
+
+def test_the_slider_starts_over_in_the_next_round(tasting):
+    """Попробовав, человек меняет мнение — и первое впечатление не должно мешать."""
+    me = tasting["people"][0]
+    models.save_round_draft(me, "nose", {}, {1: 80}, {1: "торф"})
+    models.set_status(tasting["id"], "round_palate")
+
+    assert models.get_scores(me, "nose") == {1: 80}
+    assert models.get_scores(me, "palate") == {}, "в новом раунде оценки ещё нет"
+
+    models.save_round_draft(me, "palate", {}, {1: 30})
+    assert models.get_scores(me, "nose") == {1: 80}, "оценка по запаху не переписана"
+    assert models.get_scores(me, "palate") == {1: 30}
+
+
+def _slider(page: str, sample_no: int) -> str:
+    """Значение бегунка образца. Искать value= по всей странице нельзя:
+    там же сотня <option value=…> из справочника."""
+    tail = page.split(f'id="score_{sample_no}"', 1)[1]
+    return tail.split('value="', 1)[1].split('"', 1)[0]
+
+
+def test_the_slider_is_in_the_middle_in_the_second_round(client, tasting):
+    """То же самое глазами гостя: бегунок посередине, а не там, где он был."""
+    token = tasting["tokens"][0]
+    client.post(f"/me/{token}/draft", json={"answers": {}, "scores": {"1": "80"}})
+    assert _slider(client.get(f"/me/{token}").text, 1) == "80"
+
+    models.set_status(tasting["id"], "round_palate")
+    assert _slider(client.get(f"/me/{token}").text, 1) == "50"
+
+
+def test_the_whisky_of_the_night_follows_the_palate(tasting):
+    """Колонка score — последнее осознанное мнение, по ней считается лучший виски."""
+    me = tasting["people"][0]
+    models.save_round_draft(me, "nose", {}, {1: 20})
+    assert models.get_ratings(me)[1]["score"] == 20
+    models.set_status(tasting["id"], "round_palate")
+    models.save_round_draft(me, "palate", {}, {1: 90})
+    assert models.get_ratings(me)[1]["score"] == 90
+    # А правка тегов оценку не трогает.
+    models.save_round_draft(me, "palate", {}, {}, {1: "дым"})
+    assert models.get_ratings(me)[1]["score"] == 90

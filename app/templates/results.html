@@ -20,7 +20,7 @@
   <h2>Турнирная таблица</h2>
   <table class="grid">
     <thead>
-      <tr><th>№</th><th>Кто</th><th>Итого</th><th>Нос</th><th>Вкус</th><th>Класс</th><th>Бонус</th></tr>
+      <tr><th>№</th><th>Кто</th><th>Итого</th><th>Нос</th><th>Вкус</th><th>{{ category_title|capitalize }}</th><th>Бонус</th></tr>
     </thead>
     <tbody>
       {% for row in board %}

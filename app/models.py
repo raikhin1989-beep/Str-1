@@ -173,12 +173,13 @@ def set_status(tasting_id: int, new_status: str) -> None:
             )
         closing = ROUND_BY_STATUS.get(current)
         if closing:
-            conn.execute(
-                "UPDATE answer SET submitted_at = CURRENT_TIMESTAMP"
-                " WHERE round = ? AND submitted_at IS NULL AND participant_id IN"
-                "       (SELECT id FROM participant WHERE tasting_id = ?)",
-                (closing, tasting_id),
-            )
+            for table in ("answer", "answer_category"):
+                conn.execute(
+                    f"UPDATE {table} SET submitted_at = CURRENT_TIMESTAMP"
+                    " WHERE round = ? AND submitted_at IS NULL AND participant_id IN"
+                    "       (SELECT id FROM participant WHERE tasting_id = ?)",
+                    (closing, tasting_id),
+                )
         conn.execute("UPDATE tasting SET status = ? WHERE id = ?", (new_status, tasting_id))
 
 
@@ -593,11 +594,22 @@ def get_answers(participant_id: int, round_name: str) -> dict[int, int]:
 
 
 def round_submitted(participant_id: int, round_name: str) -> bool:
+    """Заморожен ли ответ. Смотрим обе таблицы, и это не формальность.
+
+    Ответ бывает и без единого названия — когда гость назвал только класс
+    (или регион). Пока сюда смотрела одна таблица answer, такой гость после
+    «Отправить» видел форму заново, будто ничего не сохранилось, а админка
+    показывала «сдали 0».
+    """
     with connect() as conn:
         row = conn.execute(
             "SELECT 1 FROM answer"
-            " WHERE participant_id = ? AND round = ? AND submitted_at IS NOT NULL LIMIT 1",
-            (participant_id, round_name),
+            " WHERE participant_id = ? AND round = ? AND submitted_at IS NOT NULL"
+            " UNION ALL"
+            " SELECT 1 FROM answer_category"
+            " WHERE participant_id = ? AND round = ? AND submitted_at IS NOT NULL"
+            " LIMIT 1",
+            (participant_id, round_name, participant_id, round_name),
         ).fetchone()
     return row is not None
 
@@ -701,24 +713,62 @@ def _save_ratings(conn, participant_id, round_name, valid_samples, scores, tags)
         if sample_no not in valid_samples:
             continue
         row = conn.execute(
-            "SELECT score, tags FROM rating WHERE participant_id = ? AND sample_no = ?",
+            "SELECT score, scores, tags FROM rating"
+            " WHERE participant_id = ? AND sample_no = ?",
             (participant_id, sample_no),
         ).fetchone()
-        score = scores.get(sample_no, row["score"] if row else None)
-        stored = {}
-        if row and row["tags"]:
-            try:
-                stored = json.loads(row["tags"])
-            except ValueError:
-                stored = {}
+        stored_tags = _json_map(row["tags"] if row else None)
+        stored_scores = _json_map(row["scores"] if row else None)
         if sample_no in tags:
-            stored[round_name] = tags[sample_no][:MAX_TAGS_LENGTH]
+            stored_tags[round_name] = tags[sample_no][:MAX_TAGS_LENGTH]
+        if sample_no in scores and scores[sample_no] is not None:
+            stored_scores[round_name] = scores[sample_no]
+        # score — последнее осознанное мнение: вкус, если он есть. По нему
+        # считается «виски вечера», и запрос за ним переписывать незачем.
+        # Строки, заведённые до разделения оценок по раундам, знают только
+        # score — его и оставляем, иначе правка тегов молча обнулит оценку.
+        latest = stored_scores.get("palate", stored_scores.get("nose"))
+        if latest is None and row is not None:
+            latest = row["score"]
         conn.execute(
-            "INSERT INTO rating (participant_id, sample_no, score, tags) VALUES (?, ?, ?, ?)"
+            "INSERT INTO rating (participant_id, sample_no, score, scores, tags)"
+            " VALUES (?, ?, ?, ?, ?)"
             " ON CONFLICT (participant_id, sample_no)"
-            " DO UPDATE SET score = excluded.score, tags = excluded.tags",
-            (participant_id, sample_no, score, json.dumps(stored, ensure_ascii=False)),
+            " DO UPDATE SET score = excluded.score, scores = excluded.scores,"
+            "               tags = excluded.tags",
+            (
+                participant_id,
+                sample_no,
+                latest,
+                json.dumps(stored_scores, ensure_ascii=False),
+                json.dumps(stored_tags, ensure_ascii=False),
+            ),
         )
+
+
+def _json_map(raw) -> dict:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def get_scores(participant_id: int, round_name: str) -> dict[int, int]:
+    """Оценки этого раунда. Пусто — бегунок стоит посередине, как в начале."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT sample_no, scores FROM rating WHERE participant_id = ?",
+            (participant_id,),
+        ).fetchall()
+    result = {}
+    for row in rows:
+        value = _json_map(row["scores"]).get(round_name)
+        if value is not None:
+            result[int(row["sample_no"])] = int(value)
+    return result
 
 
 def submit_round(participant_id: int, round_name: str) -> None:
@@ -727,15 +777,22 @@ def submit_round(participant_id: int, round_name: str) -> None:
         raise ValueError("ответ уже отправлен")
     tasting_id = _tasting_of(participant_id)
     total = len(sample_numbers(tasting_id))
-    answers = get_answers(participant_id, round_name)
-    if len(answers) < total:
-        raise ValueError(f"заполнено {len(answers)} из {total} — ответьте на все образцы")
+    # Образец считается отвеченным, если названо хоть что-то: розлив или
+    # класс. Пока сюда смотрели только названия, гость, ответивший одними
+    # классами, получал «заполнено 0 из 3» и не мог отправить ответ вовсе —
+    # при том что баллы за эти классы начислялись.
+    filled = set(get_answers(participant_id, round_name)) | set(
+        get_categories(participant_id, round_name)
+    )
+    if len(filled) < total:
+        raise ValueError(f"заполнено {len(filled)} из {total} — ответьте на все образцы")
     with connect() as conn:
-        conn.execute(
-            "UPDATE answer SET submitted_at = CURRENT_TIMESTAMP"
-            " WHERE participant_id = ? AND round = ?",
-            (participant_id, round_name),
-        )
+        for table in ("answer", "answer_category"):
+            conn.execute(
+                f"UPDATE {table} SET submitted_at = CURRENT_TIMESTAMP"
+                " WHERE participant_id = ? AND round = ?",
+                (participant_id, round_name),
+            )
 
 
 def round_progress(tasting_id: int, round_name: str) -> tuple[int, int]:
@@ -743,12 +800,17 @@ def round_progress(tasting_id: int, round_name: str) -> tuple[int, int]:
     with connect() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS total,"
-            "       (SELECT COUNT(DISTINCT a.participant_id) FROM answer a"
-            "         JOIN participant p2 ON p2.id = a.participant_id"
-            "        WHERE p2.tasting_id = ? AND a.round = ? AND a.submitted_at IS NOT NULL"
-            "       ) AS done"
+            "       (SELECT COUNT(DISTINCT id) FROM ("
+            "          SELECT a.participant_id AS id FROM answer a"
+            "            JOIN participant p2 ON p2.id = a.participant_id"
+            "           WHERE p2.tasting_id = ? AND a.round = ? AND a.submitted_at IS NOT NULL"
+            "          UNION"
+            "          SELECT c.participant_id FROM answer_category c"
+            "            JOIN participant p3 ON p3.id = c.participant_id"
+            "           WHERE p3.tasting_id = ? AND c.round = ? AND c.submitted_at IS NOT NULL"
+            "       )) AS done"
             " FROM participant WHERE tasting_id = ?",
-            (tasting_id, round_name, tasting_id),
+            (tasting_id, round_name, tasting_id, round_name, tasting_id),
         ).fetchone()
     return int(row["done"] or 0), int(row["total"] or 0)
 
@@ -761,12 +823,17 @@ def answer_status(tasting_id: int) -> dict[int, dict[str, str]]:
     человек вкус: карточка раунда уже пропала, а других следов на странице нет.
     Здесь состояние по обоим раундам, и видно оно в любой момент вечера.
     """
+    # Обе таблицы: ответ бывает и без единого названия — одними классами.
     with connect() as conn:
         rows = conn.execute(
             "SELECT p.id, a.round,"
             "       MAX(CASE WHEN a.submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS sent,"
-            "       COUNT(a.id) AS answers"
-            " FROM participant p LEFT JOIN answer a ON a.participant_id = p.id"
+            "       COUNT(a.round) AS answers"
+            " FROM participant p LEFT JOIN ("
+            "        SELECT participant_id, round, submitted_at FROM answer"
+            "        UNION ALL"
+            "        SELECT participant_id, round, submitted_at FROM answer_category"
+            "      ) a ON a.participant_id = p.id"
             " WHERE p.tasting_id = ?"
             " GROUP BY p.id, a.round",
             (tasting_id,),

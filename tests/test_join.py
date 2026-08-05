@@ -178,6 +178,23 @@ def test_without_the_public_address_links_fall_back_to_the_current_one(admin, mo
     assert "http://testserver/join/" in page
 
 
+def test_the_admin_offers_a_way_around_a_blocked_domain(admin, monkeypatch):
+    """У гостя с VPN итоги не открылись: duckdns.org режут целым суффиксом."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://raikhinwhiskey.duckdns.org")
+    monkeypatch.setenv("FALLBACK_BASE_URL", "http://203.0.113.7:8081")
+    tasting_id = models.create_tasting("Первая", None, "class")
+    page = admin.get(f"/admin/tastings/{tasting_id}").text
+    assert "http://203.0.113.7:8081/join/" in page
+    assert "VPN" in page
+
+
+def test_without_a_fallback_address_nothing_is_offered(admin, monkeypatch):
+    """Ссылка, собранная неизвестно из чего, хуже, чем никакой."""
+    monkeypatch.delenv("FALLBACK_BASE_URL", raising=False)
+    tasting_id = models.create_tasting("Первая", None, "class")
+    assert "VPN" not in admin.get(f"/admin/tastings/{tasting_id}").text
+
+
 def test_start_without_a_code_is_logged_as_a_miss(client, bot):
     """Самая частая причина «не привязалось»: человек написал боту сам."""
     from app.db import connect

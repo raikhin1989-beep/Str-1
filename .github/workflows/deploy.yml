@@ -298,7 +298,7 @@ jobs:
           command_timeout: 10m
           # Каждый секрет нужно перечислить здесь поимённо: ssh-action передаёт
           # на сервер только то, что указано в envs, остальное молча теряется.
-          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER,AI_PHOTO,TELEGRAM_BOT_TOKEN,TELEGRAM_BOT_USERNAME,TELEGRAM_WEBHOOK_SECRET
+          envs: GITHUB_SHA,SITE_ROOT,SITE_PORT,SITE_DOMAIN,SERVER_ADDR,APP_ROOT,APP_PORT,ADMIN_PASSWORD,ANTHROPIC_API_KEY,YANDEX_API_KEY,YANDEX_FOLDER_ID,AI_PROVIDER,AI_PHOTO,TELEGRAM_BOT_TOKEN,TELEGRAM_BOT_USERNAME,TELEGRAM_WEBHOOK_SECRET
           script: |
             set -e
             chmod -R a+rX "$SITE_ROOT"
@@ -348,6 +348,16 @@ jobs:
             if [ -n "$SITE_DOMAIN" ]; then
               printf 'PUBLIC_BASE_URL=https://%s\n' "$SITE_DOMAIN" >> /etc/str-1/app.env
               echo "PUBLIC_BASE_URL: https://$SITE_DOMAIN"
+            fi
+            # Запасной адрес — мимо домена, по IP и порту 8081. Нужен не «на
+            # всякий случай»: у гостя с включённым VPN итоги не открылись
+            # вовсе, потому что весь суффикс duckdns.org режут блокировщики
+            # и часть VPN. Имя не резолвится ещё до нас, чинить со своей
+            # стороны нечего — а вход на 8081 от домена не зависит.
+            # Показывается только в админке, ведущему.
+            if [ -n "$SERVER_ADDR" ]; then
+              printf 'FALLBACK_BASE_URL=http://%s:%s\n' "$SERVER_ADDR" "$SITE_PORT" >> /etc/str-1/app.env
+              echo "FALLBACK_BASE_URL: задан (порт $SITE_PORT)"
             fi
             if [ -n "$AI_PROVIDER" ]; then
               printf 'AI_PROVIDER=%s\n' "$AI_PROVIDER" >> /etc/str-1/app.env

@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
 from app import ai, auth, backup, broadcast, errors, models, telegram
-from app.config import admin_password, public_base_url
+from app.config import admin_password, fallback_base_url, public_base_url
 from app.db import connect, log_action
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -35,6 +35,21 @@ def _public(request: Request, path: str) -> str:
     """Ссылка для гостей. Публичный адрес важнее того, где открыта админка."""
     base = public_base_url() or str(request.base_url).rstrip("/")
     return f"{base}{path}"
+
+
+def _fallback_urls(code: str) -> dict[str, str]:
+    """Те же страницы, но по IP и порту 8081 — на случай, когда домен не открылся.
+
+    Пусто, если запасной адрес не задан: показывать ведущему ссылку, собранную
+    неизвестно из чего, хуже, чем не показывать ничего.
+    """
+    base = fallback_base_url()
+    if not base:
+        return {}
+    return {
+        "join": f"{base}/join/{code}",
+        "results": f"{base}/results/{code}",
+    }
 
 
 def _note(request: Request, action: str, details: str = "") -> None:
@@ -179,11 +194,23 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             ),
             "results_url": _public(request, f"/results/{tasting['public_code']}"),
             "board_url": _public(request, f"/board/{tasting['public_code']}"),
+            # Запасной адрес мимо домена: у гостя с VPN итоги не открылись —
+            # duckdns.org режут блокировщики целым суффиксом (см. config).
+            "fallback_urls": _fallback_urls(tasting["public_code"]),
             "participants": models.list_participants(tasting_id),
             # Кто что сдал по каждому раунду. Счётчик текущего раунда пропадает
             # вместе с раундом, и после вечера было не понять, сдал ли человек
             # вкус, — на живой дегустации это и спросили.
             "answered": models.answer_status(tasting_id),
+            "category_title": "регион" if tasting["category_level"] == "region" else "класс",
+            # Частичный балл считается по этому полю справочника. Если оно
+            # пустое, верный ответ гостя не стоит ничего — а понять это
+            # по итогам невозможно, там просто нули.
+            "without_category": [
+                row["name"]
+                for row in in_tasting
+                if not (row["region"] if tasting["category_level"] == "region" else row["wclass"])
+            ],
             # Личные ссылки гостей: ссылку теряют чаще всего, и восстановить
             # её должен уметь ведущий, а не тот, кто ходит в базу.
             # Совпадения по контакту с прошлыми дегустациями: связывать
