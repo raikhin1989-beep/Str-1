@@ -180,6 +180,10 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             "results_url": _public(request, f"/results/{tasting['public_code']}"),
             "board_url": _public(request, f"/board/{tasting['public_code']}"),
             "participants": models.list_participants(tasting_id),
+            # Кто что сдал по каждому раунду. Счётчик текущего раунда пропадает
+            # вместе с раундом, и после вечера было не понять, сдал ли человек
+            # вкус, — на живой дегустации это и спросили.
+            "answered": models.answer_status(tasting_id),
             # Личные ссылки гостей: ссылку теряют чаще всего, и восстановить
             # её должен уметь ведущий, а не тот, кто ходит в базу.
             # Совпадения по контакту с прошлыми дегустациями: связывать

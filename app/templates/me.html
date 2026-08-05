@@ -79,7 +79,11 @@
     {% endif %}
 
     <form method="post" action="/me/{{ token }}/submit" class="form" id="round"
-          data-draft="/me/{{ token }}/draft">
+          data-draft="/me/{{ token }}/draft" data-round="{{ round }}">
+      {# Для какого раунда нарисована эта форма. Сервер сверяет и отказывает,
+         если ведущий успел перейти дальше: иначе ответ по запаху молча
+         ложится в раунд вкуса, а настоящего ответа по вкусу уже не дать. #}
+      <input type="hidden" name="round" value="{{ round }}">
       {% for no in samples %}
       <fieldset class="sample">
         <legend>Образец {{ no }}</legend>

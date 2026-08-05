@@ -114,6 +114,18 @@ def remembered(request: Request):
     return (participant, token) if participant else None
 
 
+@router.post("/me/{token}")
+def participant_page_posted(token: str):
+    """Случайный POST на адрес страницы — не тупик, а сама страница.
+
+    Голый 405 посреди вечера выглядит как сломанный сайт, а починить его
+    гость не может: он не знает ни что нажал, ни что делать. Отправлять
+    ответы сюда всё равно нечем — форма шлёт на /submit, — так что здесь
+    остаётся только показать человеку его страницу в актуальном виде.
+    """
+    return RedirectResponse(f"/me/{token}", status_code=303)
+
+
 @router.get("/me/{token}")
 def participant_page(request: Request, token: str, error: str = ""):
     participant = models.get_participant_by_token(token)
@@ -230,11 +242,21 @@ def _tags_for(rating, round_name: str) -> str:
         return ""
 
 
-def _participant_in_round(token: str):
+def _participant_in_round(token: str, came_from: str = ""):
     """Участник, дегустация и открытый раунд — или отказ.
 
-    Раунд берётся из статуса дегустации: из формы его принимать нельзя,
-    иначе можно было бы отвечать во втором раунде, пока идёт первый.
+    Раунд для записи берётся из статуса дегустации: принимать его из формы
+    нельзя, иначе можно было бы отвечать во втором раунде, пока идёт первый.
+
+    А вот сверить с формой — обязательно, и это дорого далось. Гость держит
+    страницу раунда по запаху открытой, ведущий тем временем открывает вкус,
+    гость дожимает «Отправить» — и его ответ по запаху молча ложится в раунд
+    вкуса. Настоящего ответа по вкусу он больше не даст: отправленное
+    заморожено. Так на живой дегустации 5 августа и «потерялся» ответ.
+
+    Страница обычно перерисовывается сама (см. me.js), но связь на вечеринке
+    пропадает, вкладка засыпает, телефон блокируется — надеяться на это нельзя.
+    Поэтому расхождение ловим на сервере и говорим человеку, что произошло.
     """
     participant = models.get_participant_by_token(token)
     if participant is None:
@@ -243,13 +265,33 @@ def _participant_in_round(token: str):
     round_name = models.open_round(tasting)
     if round_name is None:
         raise HTTPException(status_code=409, detail="Сейчас раунд не идёт")
+    if came_from and came_from != round_name:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Пока вы отвечали, ведущий перешёл к другому раунду — "
+                f"сейчас идёт «{models.ROUND_TITLES.get(round_name, round_name)}». "
+                "Страница сейчас обновится, ответьте заново."
+            ),
+        )
     return participant, round_name
 
 
 @router.post("/me/{token}/draft")
 async def save_draft(request: Request, token: str):
     """Автосохранение черновика. Отвечает JSON — страница не перезагружается."""
-    participant, round_name = _participant_in_round(token)
+    try:
+        payload = await request.json()
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Не разобрал запрос"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "Не разобрал запрос"}, status_code=400)
+    try:
+        participant, round_name = _participant_in_round(token, str(payload.get("round") or ""))
+    except HTTPException as err:
+        # Черновик отвечает JSON: страница не перезагружается, и скрипту
+        # надо сказать словами, что случилось.
+        return JSONResponse({"ok": False, "error": err.detail}, status_code=err.status_code)
     try:
         # По личной ссылке, а не по адресу: за одним роутером сидит весь стол,
         # и счёт по адресу останавливал сохранение сразу всем — у кого раньше
@@ -257,14 +299,6 @@ async def save_draft(request: Request, token: str):
         limits.check("draft", token)
     except limits.TooOften:
         return JSONResponse({"ok": False, "error": "Слишком часто"}, status_code=429)
-    try:
-        payload = await request.json()
-    except ValueError:
-        # Тело не разобралось как JSON. Это не сбой приложения — это кривой
-        # запрос, и отвечать на него надо отказом, а не пятисоткой.
-        return JSONResponse({"ok": False, "error": "Не разобрал запрос"}, status_code=400)
-    if not isinstance(payload, dict):
-        return JSONResponse({"ok": False, "error": "Не разобрал запрос"}, status_code=400)
     try:
         models.save_round_draft(
             participant["id"],
@@ -281,8 +315,8 @@ async def save_draft(request: Request, token: str):
 @router.post("/me/{token}/submit")
 async def submit(request: Request, token: str):
     """Отправка ответа. Форма присылает всё разом — на случай, если JS не сработал."""
-    participant, round_name = _participant_in_round(token)
     form = await request.form()
+    participant, round_name = _participant_in_round(token, str(form.get("round") or ""))
     try:
         models.save_round_draft(
             participant["id"],

@@ -10,6 +10,7 @@
   var url = form.dataset.draft;
   var timer = null;
   var pending = false;
+  var stale = /другому раунду/;
 
   function answers() {
     var result = {};
@@ -61,6 +62,9 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        // Раунд, для которого нарисована страница: сервер сверит и не даст
+        // черновику по запаху лечь в раунд вкуса, если ведущий успел перейти.
+        round: form.dataset.round,
         answers: answers(),
         scores: collect('score_'),
         tags: collect('tags_')
@@ -69,6 +73,11 @@
       .then(function (response) { return response.json().catch(function () { return {}; }); })
       .then(function (body) {
         say(body.ok ? 'Черновик сохранён' : (body.error || 'Черновик сохранить не удалось'));
+        // Ведущий перешёл к другому раунду, пока гость отвечал. Показываем
+        // ему актуальную страницу сами: дожимать «Отправить» бессмысленно.
+        if (!body.ok && stale.test(body.error || '')) {
+          setTimeout(function () { window.location.reload(); }, 1500);
+        }
       })
       .catch(function () { say('Нет связи — черновик не сохранён, но кнопка «Отправить» работает.'); })
       .finally(function () { pending = false; });

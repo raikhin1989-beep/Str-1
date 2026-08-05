@@ -717,6 +717,36 @@ def round_progress(tasting_id: int, round_name: str) -> tuple[int, int]:
     return int(row["done"] or 0), int(row["total"] or 0)
 
 
+def answer_status(tasting_id: int) -> dict[int, dict[str, str]]:
+    """Что каждый гость сдал по каждому раунду: отправлено / черновик / ничего.
+
+    Счётчик «сдали N из M» показывает только идущий раунд и исчезает, когда
+    раунды кончились. На живой дегустации из-за этого было не понять, сдал ли
+    человек вкус: карточка раунда уже пропала, а других следов на странице нет.
+    Здесь состояние по обоим раундам, и видно оно в любой момент вечера.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT p.id, a.round,"
+            "       MAX(CASE WHEN a.submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS sent,"
+            "       COUNT(a.id) AS answers"
+            " FROM participant p LEFT JOIN answer a ON a.participant_id = p.id"
+            " WHERE p.tasting_id = ?"
+            " GROUP BY p.id, a.round",
+            (tasting_id,),
+        ).fetchall()
+    status: dict[int, dict[str, str]] = {}
+    for row in rows:
+        person = status.setdefault(int(row["id"]), {})
+        if row["round"] is None:
+            continue
+        if row["sent"]:
+            person[row["round"]] = "отправлен"
+        elif row["answers"]:
+            person[row["round"]] = "черновик"
+    return status
+
+
 # ── итоги ──────────────────────────────────────────────────────────────────
 
 RESULT_STATUSES = {"scoring", "closed"}

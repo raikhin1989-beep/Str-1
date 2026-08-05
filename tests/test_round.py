@@ -354,3 +354,66 @@ BAD_FORMS = [
 def test_a_malformed_submit_is_refused_not_crashed(client, tasting, data):
     response = client.post(f"/me/{tasting['tokens'][1]}/submit", data=data, follow_redirects=False)
     assert response.status_code < 500, response.text
+
+
+# ── ответ не должен попасть не в тот раунд ─────────────────────────────────
+
+
+def test_a_stale_form_does_not_land_in_the_next_round(client, tasting):
+    """Поймано на живой дегустации 5 августа.
+
+    Гость держит открытой страницу раунда по запаху, ведущий тем временем
+    открывает вкус, гость дожимает «Отправить» — и его ответ по запаху молча
+    ложится в раунд вкуса. Настоящего ответа по вкусу он больше не даст:
+    отправленное заморожено. Со стороны это выглядит как «ответ не пришёл».
+    """
+    token = tasting["tokens"][1]
+    person = tasting["people"][1]
+    truth = models.tasting_truth(tasting["id"])
+    stale = {f"sample_{no}": str(whisky_id) for no, whisky_id in truth.items()}
+    stale["round"] = "nose"
+
+    models.set_status(tasting["id"], "round_palate")
+    response = client.post(f"/me/{token}/submit", data=stale, follow_redirects=False)
+
+    assert response.status_code == 409
+    assert models.get_answers(person, "palate") == {}, "чужой раунд не должен записаться"
+
+
+def test_the_guest_is_told_what_happened(client, tasting):
+    """Отказ без объяснения посреди вечера — это тупик."""
+    token = tasting["tokens"][0]
+    models.set_status(tasting["id"], "round_palate")
+    page = client.post(
+        f"/me/{token}/submit",
+        data={"round": "nose", "sample_1": ""},
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+    assert "ведущий перешёл к другому раунду" in page.text
+    assert "по вкусу" in page.text
+
+
+def test_a_stale_draft_is_refused_too(client, tasting):
+    token = tasting["tokens"][0]
+    models.set_status(tasting["id"], "round_palate")
+    response = client.post(f"/me/{token}/draft", json={"round": "nose", "answers": {}})
+    assert response.status_code == 409
+    assert "другому раунду" in response.json()["error"]
+
+
+def test_the_current_round_still_goes_through(client, tasting):
+    """Проверка не должна мешать нормальному ходу вечера."""
+    token = tasting["tokens"][0]
+    truth = models.tasting_truth(tasting["id"])
+    data = {f"sample_{no}": str(whisky_id) for no, whisky_id in truth.items()}
+    data["round"] = "nose"
+    assert client.post(f"/me/{token}/submit", data=data, follow_redirects=False).status_code == 303
+    assert models.get_answers(tasting["people"][0], "nose") == truth
+
+
+def test_a_stray_post_to_the_page_is_not_a_dead_end(client, tasting):
+    """Голый 405 посреди вечера гость починить не может."""
+    response = client.post(f"/me/{tasting['tokens'][0]}", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].endswith(tasting["tokens"][0])

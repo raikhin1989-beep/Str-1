@@ -128,3 +128,37 @@ def test_the_search_comes_before_the_add_form(admin):
     page = admin.get("/admin/whiskies").text
     assert page.index("Поиск по справочнику") < page.index("Добавить виски")
 
+
+
+def test_the_admin_sees_who_answered_each_round(admin):
+    """Счётчик «сдали N из M» показывает только идущий раунд и исчезает вместе
+    с ним. После вечера было не понять, сдал ли человек вкус, — спросили на
+    живой дегустации."""
+    tasting_id = models.create_tasting("Вечер", None, "class")
+    for row in models.list_whiskies()[:3]:
+        models.add_whisky_to_tasting(tasting_id, row["id"])
+    models.set_status(tasting_id, "registration")
+    sent = models.register_participant(tasting_id, "Ответивший")
+    draft = models.register_participant(tasting_id, "Черновик")
+    models.register_participant(tasting_id, "Молчун")
+    models.set_status(tasting_id, "round_nose")
+
+    truth = models.tasting_truth(tasting_id)
+    for token, submit in ((sent, True), (draft, False)):
+        person = models.get_participant_by_token(token)["id"]
+        models.save_round_draft(person, "nose", dict(truth), {}, {})
+        if submit:
+            models.submit_round(person, "nose")
+
+    status = models.answer_status(tasting_id)
+    people = {p["name"]: p["id"] for p in models.list_participants(tasting_id)}
+    assert status[people["Ответивший"]]["nose"] == "отправлен"
+    assert status[people["Черновик"]]["nose"] == "черновик"
+    assert status.get(people["Молчун"], {}).get("nose") is None
+
+    # И это видно на странице — в том числе когда раунды уже кончились.
+    models.set_status(tasting_id, "round_palate")
+    models.set_status(tasting_id, "scoring")
+    page = admin.get(f"/admin/tastings/{tasting_id}").text
+    assert "отправлен" in page
+    assert "черновик" in page
