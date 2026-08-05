@@ -60,9 +60,11 @@ on:
   # сообщения сайту. Репозиторий публичный, минуты Actions бесплатны;
   # когда писать некому, прогон занимает секунды и ничего не делает.
   #
-  # Расписание GitHub неточное: обычно несколько минут, иногда дольше. Для
-  # вечера этого хватает — гости привязываются на регистрации, а раунд идёт
-  # дольше. Кому не терпится, тот запускает действие bind руками.
+  # Расписание GitHub не просто неточное — на «*/5» оно может не сработать
+  # вовсе: проверено, за четыре часа после включения не запустилось ни разу.
+  # Поэтому расписание оставлено как фон («когда-нибудь подберёт»), а вечер
+  # держится не на нём: перед началом ведущий запускает действие bind руками,
+  # и оно дежурит заданное число минут, забирая сообщения по мере появления.
   schedule:
     - cron: "*/5 * * * *"
 
@@ -73,6 +75,9 @@ on:
         type: choice
         options: [deploy, inspect, bind, broadcast, telegram]
         default: deploy
+      minutes:
+        description: "bind: сколько минут дежурить (0 — один заход)"
+        default: "45"
 
 concurrency:
   group: deploy-server-str-1
@@ -784,6 +789,9 @@ jobs:
   bind:
     if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.action == 'bind') }}
     runs-on: ubuntu-latest
+    # Дежурство идёт долго и почти всё время спит, ожидая сообщение. Потолок
+    # на случай, если что-то пойдёт не так: минуты Actions не бесконечны.
+    timeout-minutes: 90
     # Два прогона одновременно сдвинули бы offset друг у друга и могли бы
     # потерять сообщение. Очередь, а не отмена: терять нечего.
     concurrency:
@@ -796,12 +804,15 @@ jobs:
           SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           SUBDOMAIN: ${{ secrets.DUCKDNS_SUBDOMAIN }}
           SOFT: ${{ github.event_name == 'schedule' && 'yes' || 'no' }}
+          # Сколько минут дежурить. По расписанию — один заход и всё:
+          # расписание и есть повторение. Руками — дежурство на весь вечер.
+          WATCH_MINUTES: ${{ github.event_name == 'schedule' && '0' || inputs.minutes || '45' }}
         run: |
           set -e
           # По расписанию молчим о том, что и так понятно: письмо о падении
           # раз в пять минут — худшее, что можно сделать с почтой человека.
           # Руками запустили — говорим честно и падаем.
-          soft="${{ github.event_name == 'schedule' && 'yes' || 'no' }}"
+          soft="$SOFT"
           give_up() {
             if [ "$soft" = "yes" ]; then echo "::notice::$1"; exit 0; fi
             echo "::error::$1"; exit 1
@@ -810,22 +821,22 @@ jobs:
           if [ -z "$TOKEN" ] || [ -z "$SECRET" ] || [ -z "$SUBDOMAIN" ]; then
             give_up "нужны TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET и DUCKDNS_SUBDOMAIN"
           fi
-          site="https://$SUBDOMAIN.duckdns.org"
 
           # Вебхук мешает getUpdates: пока он стоит, Bot API отвечает 409.
           curl -sS --max-time 20 -X POST "https://api.telegram.org/bot$TOKEN/deleteWebhook" > /dev/null || true
 
-          curl -fsS --max-time 30 "https://api.telegram.org/bot$TOKEN/getUpdates?timeout=0&allowed_updates=%5B%22message%22%5D" > updates.json \
-            || give_up "телеграм не отдал обновления"
-          python3 - <<'PY'
+          # Разбор ответа вынесен в файл: в дежурстве он вызывается в цикле.
+          cat > forward.py <<'PY'
+          """Отдать сообщения сайту и сдвинуть offset — но только после того,
+          как сайт их принял. Порядок именно такой: сдвинуть раньше — значит
+          потерять привязку навсегда, телеграм второй раз её не пришлёт."""
           import json, os, sys, urllib.request
 
           data = json.load(open("updates.json"))
           updates = data.get("result", [])
-          print(f"пришло сообщений: {len(updates)}", file=sys.stderr)
           if not updates:
-              print("::notice::новых сообщений боту нет — привязывать нечего")
               raise SystemExit(0)
+          print(f"пришло сообщений: {len(updates)}", file=sys.stderr)
 
           site, secret = os.environ["SUBDOMAIN"], os.environ["SECRET"]
           url = f"https://{site}.duckdns.org/internal/outbox/{secret}/updates"
@@ -838,28 +849,66 @@ jobs:
               with urllib.request.urlopen(request, timeout=30) as response:
                   report = json.load(response)
           except Exception as err:
-              # Сайт может быть в перезапуске. По расписанию это не повод
-              # для письма: обновления телеграм подержит и отдаст в следующий
-              # раз — offset мы сдвигаем только после успешной доставки.
-              soft = os.environ.get("SOFT") == "yes"
-              print(f"::{'notice' if soft else 'error'}::сайт не принял обновления: {type(err).__name__}")
-              raise SystemExit(0 if soft else 1)
+              # Сайт может быть в перезапуске. Это не повод для письма и не
+              # повод бросать дежурство: offset не сдвинут, те же обновления
+              # придут снова.
+              print(f"::notice::сайт не принял обновления: {type(err).__name__}")
+              raise SystemExit(0)
 
           handled = report.get("handled", [])
           for kind in ("привязка", "чужой код", "мимо"):
               count = handled.count(kind)
               if count:
                   print(f"{kind}: {count}")
-          # Сдвигаем offset: телеграм считает эти обновления доставленными
-          # и второй раз их не пришлёт.
           last = max(u["update_id"] for u in updates)
           token = os.environ["TOKEN"]
           urllib.request.urlopen(
               f"https://api.telegram.org/bot{token}/getUpdates?offset={last + 1}&timeout=0",
               timeout=30,
           ).read()
-          print(f"::notice::привязано: {handled.count('привязка')}")
+          bound = handled.count("привязка")
+          if bound:
+              print(f"::notice::привязано: {bound}")
           PY
+
+          # Одиночный заход: спросить и отдать. Ждём ответа телеграма долго —
+          # это long polling, соединение висит, пока не придёт сообщение или
+          # не выйдет время. Так привязка появляется на сайте через секунды
+          # после того, как гость нажал «Старт», а не через минуты.
+          wait=25
+          [ "$WATCH_MINUTES" -gt 0 ] 2>/dev/null || wait=0
+          pass() {
+            curl -fsS --max-time $((wait + 20)) \
+              "https://api.telegram.org/bot$TOKEN/getUpdates?timeout=$wait&allowed_updates=%5B%22message%22%5D" \
+              > updates.json || return 1
+            python3 forward.py
+          }
+
+          if [ "$wait" = "0" ]; then
+            pass || give_up "телеграм не отдал обновления"
+            echo "::notice::заход по расписанию закончен"
+            exit 0
+          fi
+
+          # Дежурство. Нужно потому, что расписание GitHub на «*/5» полагаться
+          # не позволяет: проверено — за четыре часа не сработало ни разу.
+          # Вечером ждать «когда-нибудь» нельзя, поэтому ведущий запускает
+          # дежурство один раз в начале, и оно само разбирает всё, что придёт.
+          deadline=$(( $(date +%s) + WATCH_MINUTES * 60 ))
+          echo "::notice::дежурю $WATCH_MINUTES мин — привязка будет появляться сама"
+          misses=0
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            if pass; then
+              misses=0
+            else
+              # Сеть моргнула или телеграм ответил ошибкой. Разово это
+              # нормально, подряд — повод не молчать, но дежурить дальше.
+              misses=$((misses + 1))
+              [ "$misses" -lt 5 ] || echo "::warning::телеграм не отвечает $misses раз подряд"
+              sleep 10
+            fi
+          done
+          echo "::notice::дежурство закончено"
 
   # ── BROADCAST: развезти итоги в телеграм ───────────────────────────────────
   # Существует потому, что с сервера исходящие к api.telegram.org не проходят
