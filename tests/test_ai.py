@@ -221,3 +221,55 @@ def test_a_guest_on_that_page_sees_no_admin_link(admin, fake_model):
         page = guest.get(location).text
     assert "добавлен в справочник" in page
     assert "Проверить поля" not in page
+
+
+def test_the_label_text_and_a_way_to_correct_it_are_shown(client, monkeypatch):
+    """Опознали не то — гость должен видеть, что именно прочиталось.
+
+    Без этого экран «не тот виски» — тупик: непонятно, переснимать или
+    набирать руками, и что вообще пошло не так.
+    """
+    monkeypatch.setenv("AI_PHOTO", "on")
+    monkeypatch.setattr(
+        ai, "_yandex_ocr", lambda image: "THE MACALLAN DOUBLE CASK 12 YEARS OLD 40%"
+    )
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+
+    page = client.post(
+        "/whisky/photo",
+        files={"photo": ("bottle.png", b"\x89PNG\r\n\x1a\n" + b"x" * 50, "image/png")},
+    ).text
+    assert "Прочитано на этикетке" in page
+    assert "THE MACALLAN DOUBLE CASK" in page
+    assert "искать по названию" in page
+    # И запись справочника, а не пересказ модели.
+    assert "Это запись из нашего справочника" in page
+
+
+def test_the_price_carries_its_own_warning(client, monkeypatch):
+    """Цену запоминают и повторяют вслух, а модель ошибается в разы."""
+    monkeypatch.setenv("AI_PHOTO", "on")
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_ocr", lambda image: "LAPHROAIG 10 YEARS OLD 40%")
+    page = client.post(
+        "/whisky/photo",
+        files={"photo": ("bottle.png", b"\x89PNG\r\n\x1a\n" + b"x" * 50, "image/png")},
+    ).text
+    assert "Про цену" in page
+    assert "не витрина магазина" in page
+
+
+def test_an_unreadable_photo_gets_human_advice_first(monkeypatch):
+    """«Не удалось» плюс список моделей каталога гостю не помогает ничем."""
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_ocr", lambda image: "")
+    monkeypatch.setattr(ai, "_vision_candidates", lambda: [])
+
+    with pytest.raises(ai.AiUnavailable) as err:
+        ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    message = str(err.value)
+    assert "Снимите этикетку крупнее" in message
+    assert message.index("Снимите") < message.index("Подробности")

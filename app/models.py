@@ -2,6 +2,7 @@
 
 import json
 import random
+import re
 import secrets
 import sqlite3
 
@@ -242,6 +243,63 @@ def search_whiskies(query: str) -> list[sqlite3.Row]:
             for field in ("name", "distillery", "region")
         )
     ]
+
+
+# Слова, которые есть почти на каждой этикетке и ничего не говорят о том,
+# что именно в бутылке. Убираем их с обеих сторон сравнения — и из названия
+# в справочнике, и из прочитанного текста.
+#
+# Список нарочно короткий. Каждое лишнее слово здесь — это потерянный признак:
+# «Highland» выкинуть нельзя, иначе Highland Park сравняется с любым хайлендом,
+# а «Reserve» и «Cask» стоят в самих названиях розливов.
+LABEL_NOISE = {
+    "whisky", "whiskey", "scotch", "single", "malt", "blended", "blend",
+    "distillery", "distilled", "distillers", "aged", "age", "years", "year",
+    "old", "vol", "alc", "abv", "cl", "ml", "litre", "liter", "the", "of",
+    "and", "est", "product", "виски", "шотландский", "солодовый", "выдержка",
+    "лет", "года", "год",
+}
+
+
+def _label_tokens(text: str) -> set[str]:
+    """Слова, по которым имеет смысл сравнивать. Цифры оставляем: «12» —
+    это выдержка, самый различающий признак на всей этикетке."""
+    words = re.split(r"[^0-9a-zA-Zа-яёА-ЯЁ]+", (text or "").casefold())
+    return {w for w in words if len(w) > 1 and w not in LABEL_NOISE}
+
+
+def match_label(text: str, limit: int = 3) -> list[tuple[sqlite3.Row, float]]:
+    """Что из справочника похоже на прочитанное с этикетки.
+
+    Возвращает пары (запись, доля совпавших слов названия), от лучшей к худшей;
+    доля 1.0 означает, что на этикетке нашлись все слова названия.
+
+    Зачем это вообще. Раньше фотография сразу уходила в языковую модель, и
+    справочник — 132 выверенных записи, среди которых ровно те бутылки, что
+    и ставят на стол, — не участвовал никак. Модель отвечала по памяти: живой
+    случай 6 августа — «The Macallan 12» опознан неверно и с ценой 25 000 ₽,
+    при том что в справочнике он есть, с ценой 12 000 ₽. Своё знание надёжнее
+    чужой памяти, бесплатно и мгновенно.
+    """
+    found = _label_tokens(text)
+    if not found:
+        return []
+    scored = []
+    for row in list_whiskies():
+        wanted = _label_tokens(row["name"])
+        if not wanted:
+            continue
+        hits = wanted & found
+        # Одного слова мало: «12» на этикетке есть у половины справочника.
+        # Названия из одного слова («Jameson») — исключение, там больше нечему
+        # совпадать, но и ноль совпадений кандидатом не считается никогда.
+        if not hits or (len(hits) < 2 and len(wanted) > 1):
+            continue
+        scored.append((row, len(hits) / len(wanted), len(hits)))
+    # Сначала по доле совпадения, при равной доле — по числу совпавших слов:
+    # «Macallan 12 Double Cask» точнее, чем просто «Macallan 12».
+    scored.sort(key=lambda item: (item[1], item[2]), reverse=True)
+    return [(row, share) for row, share, _ in scored[:limit]]
 
 
 def save_whisky(data: dict, whisky_id: int | None = None, source: str = "manual") -> int:

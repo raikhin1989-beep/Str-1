@@ -15,6 +15,32 @@
 
 {% if card.via %}<p class="note">Как получено: {{ card.via }}.</p>{% endif %}
 
+{# Что прочиталось с этикетки — самое полезное, что можно показать, когда
+   опознали не то. Гость сразу видит, чтó ушло на разбор: «прочиталось
+   половина названия» объясняет ошибку и подсказывает, что переснять.
+   А ошибку не надо пересказывать словами — рядом поле, где текст уже
+   набран, поправьте и ищите заново. #}
+{% if card.label_text %}
+<section class="card">
+  <h2>Прочитано на этикетке</h2>
+  <p class="note" style="margin-top:0">{{ card.label_text }}</p>
+  <form method="get" action="/whisky" class="form row">
+    <input name="q" value="{{ card.name or card.label_text }}"
+           aria-label="Название виски">
+    <button type="submit">Не то — искать по названию</button>
+  </form>
+  <p class="note" style="margin-top:.5rem">Если на этикетке прочиталось мало —
+    переснимите ближе, ровно и без бликов: читается именно текст, а не форма
+    бутылки.</p>
+</section>
+{% endif %}
+
+{% if card.from_catalogue %}
+<p class="note">Это запись из нашего справочника — та же, что будет
+  в списке вариантов на дегустации.
+  <a href="/whisky/{{ card.from_catalogue }}">Открыть карточку →</a></p>
+{% endif %}
+
 {% if card.recognized %}
   {% set facts = [
     ("Крепость", (card.abv ~ " %") if card.abv else None),
@@ -22,7 +48,7 @@
     ("Бочка", card.cask),
     ("Сырьё", card.grain),
     ("Холодная фильтрация", card.filtration),
-    ("Цена", (card.price_rub ~ " ₽, ориентировочно") if card.price_rub else None),
+    ("Цена", (card.price_rub | spaced ~ " ₽, ориентировочно") if card.price_rub else None),
     ("Цвет", card.colour),
   ] %}
   {% if facts | selectattr(1) | list %}
@@ -46,13 +72,27 @@
 
   {% if card.comment %}<p class="note">{{ card.comment }}</p>{% endif %}
 
+  {# Цена — самое ненадёжное поле карточки, и притом самое заметное: её
+     запоминают и повторяют вслух. Модель российскую розницу не знает и
+     ошибается в разы (живой случай: Macallan 12 за 25 000 ₽ при настоящих
+     двенадцати). Поэтому оговорка стоит отдельной строкой, а не в общем
+     хвосте, который читают по диагонали. #}
+  {% if card.price_rub %}
+  <p class="note"><strong>Про цену.</strong> {{ card.price_rub | spaced }} ₽ — это оценка,
+    а не витрина магазина: она легко расходится с настоящей в полтора-два раза
+    и стареет вместе с курсом. Смотреть по ней стоит порядок, а не сумму.</p>
+  {% endif %}
+
   <p class="note">
     Данные ориентировочные: получены моделью, а не из каталога производителя.
     Уверенность — {{ card.confidence or "не указана" }}. Крепость и цену стоит
     сверить с этикеткой.
   </p>
 
-  {% if is_admin %}
+  {# Карточку, которая и так взята из справочника, добавлять туда незачем:
+     получилась бы вторая такая же запись — а два одинаковых названия
+     в списке ответов неразличимы, и гость теряет на этом балл. #}
+  {% if is_admin and not card.from_catalogue %}
   <form method="post" action="/admin/whiskies/import" class="inline">
     <input type="hidden" name="cache_key" value="{{ cache_key }}">
     <button type="submit">Добавить в справочник</button>

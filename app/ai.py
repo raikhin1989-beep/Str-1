@@ -24,6 +24,7 @@ import re
 import threading
 import time
 
+from app import models
 from app.config import ai_provider, anthropic_key, photo_lookup, yandex_folder, yandex_key
 from app.db import connect
 
@@ -119,7 +120,10 @@ SYSTEM = (
     "Ты помогаешь гостям дегустации разобраться в виски. Отвечай по-русски, "
     "коротко и по делу, без рекламных оборотов.\n"
     "Заполняй только то, в чём уверен: неизвестное поле оставляй пустой строкой, "
-    "не выдумывай. Цену указывай как ориентир для российской розницы.\n"
+    "не выдумывай.\n"
+    "Цена — ориентир для российской розницы за бутылку 0,7 л. Если розлив редкий "
+    "или коллекционный и цену ты знаешь плохо, оставь поле пустым: пустое поле "
+    "честнее выдуманного числа, а ошибка в разы здесь заметнее всего.\n"
     "Если опознать конкретный розлив не удалось, ставь recognized=false и объясняй "
     "в comment, что мешает."
 )
@@ -315,8 +319,33 @@ def _ask_yandex(prompt: str, image: tuple[bytes, str] | None = None) -> dict:
         label = ""
         log.warning("OCR не сработал: %s", err)
         problems.append(f"чтение этикетки — {err}")
+    else:
+        if not label:
+            # Не поломка: сервис ответил, а надписей не нашёл. Для гостя это
+            # самый частый исход неудачи, и совет ему нужен человеческий,
+            # а не список моделей каталога Yandex Cloud.
+            problems.append("на фотографии не нашлось ни одной надписи")
     if label:
-        card = _yandex_card(YANDEX_TEXT_MODEL, _prompt_with_label(prompt, label), None)
+        # Сначала свой справочник. В нём 132 выверенных записи, и это ровно
+        # те бутылки, которые ставят на стол; модель же отвечает по памяти
+        # и ошибается там, где мы знаем точно. Живой случай 6 августа:
+        # «The Macallan 12» опознан неверно и с ценой 25 000 ₽ — при том
+        # что он есть в справочнике, с ценой 12 000 ₽.
+        matches = models.match_label(label)
+        if matches and matches[0][1] >= 1.0:
+            card = _card_from_catalogue(matches[0][0])
+            card["label_text"] = label
+            card["via"] = "этикетка прочитана Yandex Vision OCR и найдена в справочнике"
+            return card
+        # Не совпало целиком — идём к модели, но не с пустыми руками:
+        # называем ей ближайшие записи справочника. Догадка, ограниченная
+        # нашим списком, точнее догадки ни о чём.
+        card = _yandex_card(
+            YANDEX_TEXT_MODEL,
+            _prompt_with_label(prompt, label, [row["name"] for row, _ in matches]),
+            None,
+        )
+        card["label_text"] = label
         card["via"] = "текст с этикетки прочитан Yandex Vision OCR"
         return card
 
@@ -366,8 +395,19 @@ def _did_not_see_the_image(card: dict) -> bool:
 
 
 def _photo_failure(problems: list[str]) -> str:
-    """Собрать отказ так, чтобы из него было понятно, что чинить."""
+    """Собрать отказ так, чтобы из него было понятно, что чинить.
+
+    Первая фраза — гостю и про то, что делать руками. Дальше — подробности
+    для ведущего: почему не вышло. Порядок именно такой, потому что гость
+    читает первую строку, а до второй доходит только тот, кто чинит.
+    """
     parts = ["Распознать фотографию не удалось."]
+    if any("ни одной надписи" in problem for problem in problems):
+        parts.append(
+            "Мы читаем именно текст на этикетке, а не форму бутылки. "
+            "Снимите этикетку крупнее и ровнее, при обычном свете и без бликов — "
+            "или наберите название руками, так надёжнее всего."
+        )
     if any("прочитать нечем" in problem for problem in problems):
         parts.append(
             "Этикетку мы читаем как текст, а этот формат для чтения не подходит: "
@@ -387,8 +427,18 @@ def _photo_failure(problems: list[str]) -> str:
     return " ".join(parts)[:700]
 
 
-def _prompt_with_label(prompt: str, label: str) -> str:
-    return (
+def _card_from_catalogue(row) -> dict:
+    """Карточка из записи справочника — без единого обращения к модели."""
+    card = {field: row[field] for field in models.WHISKY_FIELDS if field in row.keys()}
+    card["recognized"] = True
+    card["confidence"] = "высокая"
+    card["from_catalogue"] = int(row["id"])
+    card["comment"] = ""
+    return normalise_card(card)
+
+
+def _prompt_with_label(prompt: str, label: str, candidates: list[str] | None = None) -> str:
+    text = (
         prompt
         + "\n\nСамой фотографии у тебя нет — вот текст, распознанный на этикетке "
         "(строки идут как на бутылке, возможны ошибки распознавания):\n"
@@ -396,6 +446,16 @@ def _prompt_with_label(prompt: str, label: str) -> str:
         "Опознай виски по этому тексту. Если текста слишком мало или он не про "
         "виски, ставь recognized=false и скажи в comment, что именно прочиталось."
     )
+    if candidates:
+        # Подсказка, а не приказ: этикетка могла быть и от бутылки, которой
+        # у нас нет. Но если совпадает — пусть берёт название из справочника,
+        # тогда карточка сойдётся с тем, что гость увидит в списке ответов.
+        text += (
+            "\n\nВ нашем справочнике есть похожие записи: "
+            + "; ".join(f"«{name}»" for name in candidates)
+            + ". Если этикетка — про одну из них, назови её ровно так же."
+        )
+    return text
 
 
 def _yandex_ocr(image: tuple[bytes, str]) -> str:
@@ -845,7 +905,12 @@ def _only_number(value) -> str:
     if value is None:
         return ""
     match = re.search(r"\d+(?:[.,]\d+)?", str(value))
-    return match.group(0).replace(",", ".") if match else ""
+    if not match:
+        return ""
+    number = match.group(0).replace(",", ".")
+    # «40.0 %» на карточке — след того, что крепость пришла из базы числом.
+    # Хвост из нуля ничего не сообщает, а читается как точность.
+    return number[:-2] if number.endswith(".0") else number
 
 
 # ── кэш ────────────────────────────────────────────────────────────────────

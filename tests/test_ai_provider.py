@@ -140,25 +140,75 @@ def no_ocr(monkeypatch):
 
 
 def test_label_is_read_by_ocr_first(monkeypatch):
-    """Название и крепость на этикетке написаны буквами — читать их надёжнее, чем угадывать."""
+    """Название и крепость на этикетке написаны буквами — читать их надёжнее, чем угадывать.
+
+    Этикетка нарочно от бутылки, которой в справочнике нет: иначе ответ
+    возьмётся оттуда и до модели дело не дойдёт (см. следующий тест).
+    """
     seen = {}
 
     def fake_post(payload, allow_retry):
         seen["model"] = payload["model"]
         seen["prompt"] = payload["messages"][-1]["content"][0]["text"]
-        return {"choices": [{"message": {"content": '{"name": "Laphroaig 10"}'}}]}
+        return {"choices": [{"message": {"content": '{"name": "Некий Односолодовый"}'}}]}
 
     monkeypatch.setenv("YANDEX_API_KEY", "ключ")
     monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
     monkeypatch.setattr(ai, "_yandex_post", fake_post)
-    monkeypatch.setattr(ai, "_yandex_ocr", lambda image: "LAPHROAIG 10 YEARS OLD 40%")
+    monkeypatch.setattr(ai, "_yandex_ocr", lambda image: "NEKIY ODNOSOLODOVIY 43% 0.7L")
 
     card = ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
-    assert card["name"] == "Laphroaig 10"
+    assert card["name"] == "Некий Односолодовый"
     assert "OCR" in card["via"]
     # Текстовой модели, а не картиночной: картинку она всё равно не увидит.
     assert seen["model"] == "gpt://b1gtest/yandexgpt/latest"
-    assert "LAPHROAIG 10 YEARS OLD 40%" in seen["prompt"]
+    assert "NEKIY ODNOSOLODOVIY 43% 0.7L" in seen["prompt"]
+    # И прочитанное показываем гостю: по нему видно, почему опознали не то.
+    assert card["label_text"] == "NEKIY ODNOSOLODOVIY 43% 0.7L"
+
+
+def test_a_label_we_know_never_reaches_the_model(monkeypatch):
+    """Своё знание надёжнее чужой памяти — и бесплатно.
+
+    Живой случай 6 августа: «The Macallan 12» опознан неверно и с ценой
+    25 000 ₽, при том что он есть в справочнике с ценой 12 000 ₽. Справочник
+    в разборе фотографии не участвовал вовсе.
+    """
+    def boom(*args, **kwargs):
+        raise AssertionError("модель не должна вызываться: виски есть в справочнике")
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", boom)
+    monkeypatch.setattr(
+        ai,
+        "_yandex_ocr",
+        lambda image: "THE MACALLAN DOUBLE CASK 12 YEARS OLD HIGHLAND SINGLE MALT 40% 700ML",
+    )
+
+    card = ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert card["name"] == "The Macallan 12 Double Cask"
+    assert card["price_rub"] == "12000", "цена из справочника, а не выдуманная"
+    assert card["from_catalogue"], "должна быть ссылка на запись справочника"
+    assert "справочник" in card["via"]
+
+
+def test_the_model_is_told_what_we_have_nearby(monkeypatch):
+    """Совпало не целиком — догадка, ограниченная нашим списком, точнее."""
+    seen = {}
+
+    def fake_post(payload, allow_retry):
+        seen["prompt"] = payload["messages"][-1]["content"][0]["text"]
+        return {"choices": [{"message": {"content": '{"name": "The Macallan 12 Sherry Oak"}'}}]}
+
+    monkeypatch.setenv("YANDEX_API_KEY", "ключ")
+    monkeypatch.setenv("YANDEX_FOLDER_ID", "b1gtest")
+    monkeypatch.setattr(ai, "_yandex_post", fake_post)
+    monkeypatch.setattr(ai, "_yandex_ocr", lambda image: "THE MACALLAN 12 YEARS OLD SHERRY")
+
+    ai._ask_yandex("что на фото?", image=(b"\xff\xd8data", "image/jpeg"))
+    assert "The Macallan 12 Sherry Oak" in seen["prompt"]
+    assert "справочник" in seen["prompt"]
 
 
 def test_ocr_reads_the_full_text_of_a_page(monkeypatch):

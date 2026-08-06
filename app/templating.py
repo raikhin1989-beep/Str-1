@@ -32,8 +32,17 @@ def plural(number, one: str, few: str, many: str) -> str:
     return many
 
 
+def spaced(number) -> str:
+    """12000 → «12 000». Цену читают глазами, а не считают разряды пальцем."""
+    try:
+        return f"{int(str(number).strip()):,}".replace(",", "\u00a0")
+    except (TypeError, ValueError):
+        return str(number or "")
+
+
 def build() -> Jinja2Templates:
     """Окружение шаблонов со всеми нашими фильтрами."""
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["plural"] = plural
+    templates.env.filters["spaced"] = spaced
     return templates
