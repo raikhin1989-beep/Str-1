@@ -15,7 +15,7 @@ def bot(monkeypatch):
     from app import telegram
 
     sent = []
-    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)) or True)
+    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text, **_: sent.append((chat_id, text)) or True)
     return sent
 
 
@@ -156,3 +156,50 @@ def test_both_roads_share_one_rule(client, bot):
 
     assert models.get_participant_by_token(first)["tg_chat_id"] == 101
     assert models.get_participant_by_token(second)["tg_chat_id"] == 202
+
+
+def test_a_batch_of_bindings_does_not_freeze_the_site(client, bot, monkeypatch):
+    """Подтверждение боту с этого сервера не уходит и упирается в таймаут.
+
+    Пока разбор пачки шёл прямо в обработчике, весь сайт на это время стоял:
+    обработчик асинхронный, а отправка — обычный блокирующий запрос. Гости
+    в это время опрашивают сервер раз в три секунды и видят зависшую страницу.
+    """
+    import threading
+    import time
+
+    from app import telegram
+
+    handler_thread = {}
+
+    def slow_send(chat_id, text, **_):
+        handler_thread["name"] = threading.current_thread().name
+        time.sleep(0.05)
+        bot.append((chat_id, text))
+        return True
+
+    monkeypatch.setattr(telegram, "send_message", slow_send)
+
+    tasting_id = models.create_tasting("Пачка", None, "class")
+    models.add_whisky_to_tasting(tasting_id, models.save_whisky({"name": "Oban 14"}))
+    models.set_status(tasting_id, "registration")
+    code = models.get_tasting(tasting_id)["public_code"]
+    tokens = []
+    for name in ("Аня", "Боря", "Вера"):
+        client.post(f"/join/{code}", data={"name": name}, follow_redirects=True)
+    for person in models.list_participants(tasting_id):
+        tokens.append(person["join_token"])
+
+    response = client.post(
+        f"/internal/outbox/{SECRET}/updates",
+        json={
+            "updates": [
+                {"message": {"chat": {"id": 900 + i}, "text": f"/start {token}"}}
+                for i, token in enumerate(tokens)
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["handled"] == ["привязка"] * 3
+    # Главное: разбор шёл не в потоке цикла событий.
+    assert handler_thread["name"] != "MainThread", handler_thread

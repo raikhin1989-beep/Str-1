@@ -157,7 +157,7 @@ def participant_page(request: Request, token: str, error: str = ""):
         "waiting_for": _waiting_for(tasting["status"]),
         # «за класс» на дегустации по регионам — враньё в глаза. Подпись
         # везде идёт от того, как заведена дегустация.
-        "category_title": _category_title(tasting),
+        "category_title": models.category_title(tasting),
         "error": error,
     }
     if tasting["status"] in models.RESULT_STATUSES:
@@ -244,10 +244,6 @@ def participant_state(token: str):
     }
 
 
-def _category_title(tasting) -> str:
-    return "регион" if tasting["category_level"] == "region" else "класс"
-
-
 def _tags_for(rating, round_name: str) -> str:
     try:
         return json.loads(rating["tags"] or "{}").get(round_name, "")
@@ -330,7 +326,17 @@ async def save_draft(request: Request, token: str):
 async def submit(request: Request, token: str):
     """Отправка ответа. Форма присылает всё разом — на случай, если JS не сработал."""
     form = await request.form()
-    participant, round_name = _participant_in_round(token, str(form.get("round") or ""))
+    try:
+        participant, round_name = _participant_in_round(token, str(form.get("round") or ""))
+    except HTTPException as err:
+        # 409 — «раунд уже другой» или «раунд закончился». Страница ошибки
+        # здесь злая: у гостя посреди вечера кнопка «Отправить» приводит
+        # в тупик, где из ссылок только «на главную». Возвращаем его на его же
+        # страницу — там уже нарисован тот раунд, который идёт сейчас,
+        # и написано, что произошло.
+        if err.status_code == 409:
+            return RedirectResponse(f"/me/{token}?error={err.detail}", status_code=303)
+        raise
     try:
         models.save_round_draft(
             participant["id"],
@@ -426,7 +432,7 @@ def results_page(request: Request, code: str):
             "samples": models.sample_breakdown(tasting["id"]) if ready else [],
             "best": models.whisky_of_the_night(tasting["id"]) if ready else None,
             "max_points": scoring.max_points(len(models.sample_numbers(tasting["id"]))),
-            "category_title": _category_title(tasting),
+            "category_title": models.category_title(tasting),
             "code": code,
         },
     )
@@ -441,7 +447,10 @@ def board_page(request: Request, code: str):
     return templates.TemplateResponse(
         request,
         "board.html",
-        {"tasting": tasting, "code": code},
+        # Подпись колонки — от того, как заведена дегустация. На странице
+        # итогов это уже поправлено, а экран проектора висит рядом с ней,
+        # и «Класс» на дегустации по регионам врёт крупнее всего.
+        {"tasting": tasting, "code": code, "category_title": models.category_title(tasting)},
     )
 
 

@@ -202,7 +202,7 @@ def tasting_page(request: Request, tasting_id: int, error: str = "", ok: str = "
             # вместе с раундом, и после вечера было не понять, сдал ли человек
             # вкус, — на живой дегустации это и спросили.
             "answered": models.answer_status(tasting_id),
-            "category_title": "регион" if tasting["category_level"] == "region" else "класс",
+            "category_title": models.category_title(tasting),
             # Частичный балл считается по этому полю справочника. Если оно
             # пустое, верный ответ гостя не стоит ничего — а понять это
             # по итогам невозможно, там просто нули.
@@ -382,6 +382,24 @@ def remove_sample(tasting_id: int, whisky_id: int):
     except ValueError as err:
         return _redirect(f"/admin/tastings/{tasting_id}?error={err}")
     return _redirect(f"/admin/tastings/{tasting_id}?ok=Виски убран")
+
+
+@router.post("/tastings/{tasting_id}/participants", dependencies=[Depends(require_admin)])
+def add_participant(request: Request, tasting_id: int, name: str = Form(""), contact: str = Form("")):
+    """Записать гостя руками — тем же движением, что и публичная ссылка.
+
+    Нужно опоздавшему: публичная запись закрывается вместе с началом раундов,
+    и до сих пор человек, пришедший на десять минут позже, оставался вне
+    вечера совсем — обойти это не мог ни он, ни ведущий.
+    """
+    try:
+        models.register_participant(tasting_id, name, contact, by_host=True)
+    except ValueError as err:
+        return _redirect(f"/admin/tastings/{tasting_id}?error={err}")
+    _note(request, "participant.add", f"дегустация {tasting_id}, вручную")
+    return _redirect(
+        f"/admin/tastings/{tasting_id}?ok=Гость записан — отдайте ему личную ссылку из таблицы"
+    )
 
 
 @router.post("/tastings/{tasting_id}/shuffle", dependencies=[Depends(require_admin)])

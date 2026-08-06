@@ -57,6 +57,17 @@ WHISKY_CLASSES = [
 
 CATEGORY_LEVELS = {"class": "по классу", "region": "по региону"}
 
+
+def category_title(tasting) -> str:
+    """Как в этой дегустации называется то, за что даётся частичный балл.
+
+    Одно место на весь проект намеренно. Подпись стоит в семи местах —
+    итоги, экран проектора, админка, страница гостя, сообщение в телеграм, —
+    и когда она жила отдельной строкой в каждом, дегустация по регионам
+    везде рассказывала гостям про класс. Так и случилось на живом вечере.
+    """
+    return "регион" if tasting["category_level"] == "region" else "класс"
+
 # Из чего участник выбирает ответ. Справочник целиком — сложнее и честнее:
 # частичный балл за класс начинает что-то значить, потому что можно назвать
 # виски, которого на столе нет. Только налитое — режим полегче.
@@ -409,7 +420,9 @@ def get_participant_by_token(token: str) -> sqlite3.Row | None:
 MAX_CONTACT_LENGTH = 120
 
 
-def register_participant(tasting_id: int, name: str, contact: str = "") -> str:
+def register_participant(
+    tasting_id: int, name: str, contact: str = "", by_host: bool = False
+) -> str:
     """Записать гостя и вернуть его личный токен.
 
     Токен — и адрес личной страницы, и полезная нагрузка deep link'а телеграма,
@@ -417,6 +430,12 @@ def register_participant(tasting_id: int, name: str, contact: str = "") -> str:
 
     Контакт необязательный и никак не проверяется: он нужен ведущему, чтобы
     было куда переслать личную ссылку, если гость её потеряет.
+
+    by_host снимает проверку статуса, и только её. Публичная ссылка после
+    начала раундов закрыта намеренно — случайный человек не должен вписаться
+    в идущую дегустацию. Но опоздавший на вечеринке — это правило, а не
+    исключение, и до сих пор он оставался за бортом совсем: другого пути
+    внутрь не было ни у него, ни у ведущего. Теперь есть, и решает ведущий.
     """
     clean = " ".join(name.split())
     if not clean:
@@ -428,7 +447,11 @@ def register_participant(tasting_id: int, name: str, contact: str = "") -> str:
     tasting = get_tasting(tasting_id)
     if tasting is None:
         raise ValueError("дегустация не найдена")
-    if tasting["status"] != "registration":
+    if tasting["status"] in RESULT_STATUSES:
+        # Итоги уже посчитаны: запись сюда — это участник с нулём и без
+        # единого раунда. Ему нужна следующая дегустация, а не эта.
+        raise ValueError("дегустация уже закончена")
+    if not by_host and tasting["status"] != "registration":
         raise ValueError("регистрация на эту дегустацию сейчас закрыта")
 
     token = secrets.token_urlsafe(16)
@@ -522,6 +545,14 @@ ROUND_TITLES = {"nose": "по запаху", "palate": "по вкусу"}
 ROUND_BY_STATUS = {"round_nose": "nose", "round_palate": "palate"}
 
 MAX_TAGS_LENGTH = 200
+
+# Класс (или регион) в ответе — это выбор из выпадающего списка, но приходит
+# он тем же POST, что и всё остальное, и прислать туда можно что угодно любой
+# длины. Самое длинное настоящее значение — 28 символов («односолодовый
+# (не Шотландия)»), самый длинный регион справочника — 13. Потолок с большим
+# запасом: он не отбирает ни одного честного ответа и не даёт залить в базу
+# мегабайт текста на каждый образец.
+MAX_CATEGORY_LENGTH = 60
 
 
 def open_round(tasting: sqlite3.Row) -> str | None:
@@ -680,7 +711,7 @@ def _save_categories(conn, participant_id, round_name, valid_samples, categories
         (participant_id, round_name),
     )
     rows = [
-        (participant_id, round_name, no, value.strip())
+        (participant_id, round_name, no, value.strip()[:MAX_CATEGORY_LENGTH])
         for no, value in categories.items()
         if no in valid_samples and (value or "").strip()
     ]
@@ -722,7 +753,11 @@ def _save_ratings(conn, participant_id, round_name, valid_samples, scores, tags)
         if sample_no in tags:
             stored_tags[round_name] = tags[sample_no][:MAX_TAGS_LENGTH]
         if sample_no in scores and scores[sample_no] is not None:
-            stored_scores[round_name] = scores[sample_no]
+            # Бегунок ходит от 0 до 100, но приходит оценка обычным полем
+            # формы, и прислать туда можно любое число. По этим оценкам
+            # выбирается «виски вечера»: без потолка один гость с консолью
+            # в браузере назначает победителя вечера в одиночку.
+            stored_scores[round_name] = max(0, min(100, scores[sample_no]))
         # score — последнее осознанное мнение: вкус, если он есть. По нему
         # считается «виски вечера», и запрос за ним переписывать незачем.
         # Строки, заведённые до разделения оценок по раундам, знают только
@@ -895,10 +930,19 @@ def category_choices(level: str) -> list[str]:
 
 
 def palate_finished_at(tasting_id: int) -> dict[int, str | None]:
-    """Когда участник отправил второй раунд — это последний тай-брейк."""
+    """Когда участник отправил второй раунд — это последний тай-брейк.
+
+    Обе таблицы: ответ бывает и без единого названия, одними классами. Пока
+    смотрели в одну, такой участник выглядел как «не отправлял вовсе» и при
+    равенстве очков всегда оказывался ниже — за то, чего не делал.
+    """
     with connect() as conn:
         rows = conn.execute(
-            "SELECT a.participant_id, MAX(a.submitted_at) AS at FROM answer a"
+            "SELECT a.participant_id, MAX(a.submitted_at) AS at FROM ("
+            "   SELECT participant_id, round, submitted_at FROM answer"
+            "   UNION ALL"
+            "   SELECT participant_id, round, submitted_at FROM answer_category"
+            " ) a"
             " JOIN participant p ON p.id = a.participant_id"
             " WHERE p.tasting_id = ? AND a.round = 'palate'"
             " GROUP BY a.participant_id",

@@ -18,6 +18,14 @@ log = logging.getLogger("str1.telegram")
 API = "https://api.telegram.org"
 TIMEOUT = 5.0
 
+# Отдельный, короткий таймаут для сообщений «в один конец» — тех, ответа
+# на которые никто не ждёт. С этого сервера они всё равно не уходят, а платит
+# за ожидание тот, кто в это время открыл сайт: пока запрос висит, привязка
+# следующего гостя не обрабатывается. Пять секунд на человека при пачке
+# в шесть привязок — это полминуты, за которые раннер успевает отвалиться
+# по своему таймауту и привезти те же сообщения заново.
+NOTIFY_TIMEOUT = 2.0
+
 # Имя бота нужно для deep link'а. Основной путь — переменная окружения:
 # её заполняет деплой, спросив у API с раннера GitHub. С самого сервера
 # api.telegram.org может быть недоступен (проверено: TCP-таймаут), и тогда
@@ -86,7 +94,7 @@ def deep_link(join_token: str) -> str | None:
     return f"https://t.me/{name}?start={join_token}" if name else None
 
 
-def send_message(chat_id: int, text: str) -> bool:
+def send_message(chat_id: int, text: str, timeout: float = TIMEOUT) -> bool:
     """Отправить сообщение. Возвращает, дошло ли — рассылка не должна падать."""
     if not token():
         return False
@@ -94,7 +102,7 @@ def send_message(chat_id: int, text: str) -> bool:
         response = httpx.post(
             f"{API}/bot{token()}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
-            timeout=TIMEOUT,
+            timeout=timeout,
         )
         response.raise_for_status()
         return True

@@ -28,7 +28,7 @@ def bot(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:тест")
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "secret-0123456789")
     monkeypatch.setattr(
-        telegram, "send_message", lambda chat_id, text: box.append((chat_id, text)) or True
+        telegram, "send_message", lambda chat_id, text, **_: box.append((chat_id, text)) or True
     )
     return box
 

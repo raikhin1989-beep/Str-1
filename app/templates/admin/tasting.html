@@ -135,6 +135,20 @@
   {% endif %}
   {% endif %}
 
+  {# Опоздавший — это правило вечеринки, а не исключение. Публичная запись
+     закрывается вместе с началом раундов, и без этой формы человек, пришедший
+     на десять минут позже, остаётся вне вечера совсем. #}
+  {% if tasting.status not in ('scoring', 'closed') %}
+  <form method="post" action="/admin/tastings/{{ tasting.id }}/participants" class="form row">
+    <input name="name" placeholder="Имя опоздавшего" maxlength="60" required aria-label="Имя гостя">
+    <input name="contact" placeholder="Куда прислать (необязательно)" maxlength="120" aria-label="Контакт">
+    <button type="submit">Записать</button>
+  </form>
+  <p class="note" style="margin-top:-.4rem">Запись по ссылке закрывается вместе
+    с началом раундов — а опоздавшего записать всё равно надо. Отдайте ему
+    личную ссылку из таблицы; идущий раунд ему доступен сразу.</p>
+  {% endif %}
+
   {% if participants %}
   <table class="grid">
     <thead><tr><th>Имя</th><th>Запах</th><th>Вкус</th><th>Куда прислать</th><th>Телеграм</th><th>Личная ссылка</th></tr></thead>

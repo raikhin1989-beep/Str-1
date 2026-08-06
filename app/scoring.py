@@ -32,6 +32,12 @@ class SampleResult:
     truth_id: int
     nose_id: int | None = None
     palate_id: int | None = None
+    # Что участник назвал классом (или регионом) напрямую. Нужно не для
+    # подсчёта, а для разбора: у того, кто отвечал одними классами, названий
+    # нет вовсе, и без этого он видит в своей таблице прочерки и баллы,
+    # взявшиеся ниоткуда.
+    nose_category: str | None = None
+    palate_category: str | None = None
     nose_points: int = 0
     palate_points: int = 0
     consistent: bool = False
@@ -98,6 +104,9 @@ def score_participant(
         hits = 0
         for sample_no, truth_id in truth.items():
             chosen = given.get(sample_no)
+            claimed = (named.get(sample_no) or "").strip()
+            if claimed:
+                setattr(per_sample[sample_no], f"{round_name}_category", claimed)
             if chosen is None:
                 # Названия нет — но класс мог быть назван прямо. Это и есть
                 # тот случай, ради которого поле появилось: человек уверен

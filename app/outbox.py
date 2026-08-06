@@ -25,6 +25,7 @@ import hmac
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app import broadcast, models, telegram
 from app import telegram_link
@@ -62,8 +63,15 @@ def outbox(request: Request, secret: str):
 async def mark(request: Request, secret: str):
     """Отметить доставленные. Тело: {"ids": [...]}."""
     _check(secret)
-    payload = await request.json()
-    ids = [int(value) for value in (payload.get("ids") or [])]
+    # Тело приходит от раннера, но разбирается оно здесь: кривой JSON и
+    # «id» строкой роняли запрос пятисоткой, а раннер по такому ответу
+    # решает, что доставка не удалась, — и в следующий раз шлёт итоги
+    # тем, кому они уже пришли.
+    try:
+        payload = await request.json()
+        ids = [int(value) for value in (payload.get("ids") or [])]
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="ожидался объект с полем ids")
     for participant_id in ids:
         models.mark_delivered(participant_id, broadcast.KIND)
     log.info("итоги доставлены участникам: %s", ids)
@@ -87,9 +95,11 @@ async def incoming(request: Request, secret: str):
     payload = await request.json()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="ожидался объект")
-    handled = []
-    for update in payload.get("updates") or []:
-        if isinstance(update, dict):
-            handled.append(telegram_link.apply(update))
+    updates = [u for u in (payload.get("updates") or []) if isinstance(u, dict)]
+    # В отдельном потоке, а не прямо здесь. Разбор одной привязки ходит в сеть
+    # (подтверждение боту) и ходит в базу, а этот обработчик — async: пока он
+    # работает, весь сайт стоит. Пачка привязок посреди вечера морозила бы
+    # страницы всем гостям разом — они опрашивают сервер раз в три секунды.
+    handled = await run_in_threadpool(lambda: [telegram_link.apply(u) for u in updates])
     log.info("привезено обновлений: %s", len(handled))
     return {"ok": True, "handled": handled}

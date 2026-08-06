@@ -87,3 +87,21 @@ def test_the_home_page_describes_a_working_site(client):
     assert "появится" not in page
     assert "Как считаются очки" in page
     assert "Открыть поиск" in page
+
+
+def test_a_broken_link_shows_a_page_not_a_json_dump(client):
+    """/whisky/ask открывается ссылкой, а не формой — и это делали.
+
+    Раньше на такой адрес FastAPI отвечал JSON с разбором запроса. Гость
+    решает по нему, что сломался весь вечер.
+    """
+    response = client.get("/whisky/ask", headers={"Accept": "text/html"})
+    assert response.status_code == 422
+    assert "На главную" in response.text
+    assert "detail" not in response.text
+
+
+def test_json_callers_still_get_json(client):
+    response = client.get("/qr.svg")
+    assert response.status_code == 422
+    assert "detail" in response.json()

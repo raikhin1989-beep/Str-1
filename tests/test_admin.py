@@ -162,3 +162,47 @@ def test_the_admin_sees_who_answered_each_round(admin):
     page = admin.get(f"/admin/tastings/{tasting_id}").text
     assert "отправлен" in page
     assert "черновик" in page
+
+
+def test_the_host_can_add_a_latecomer_after_the_rounds_start(admin, client):
+    """Публичная запись закрыта с началом раундов, а опоздавший — правило."""
+    tasting_id = models.create_tasting("Первая", None, "class")
+    for name in ("A", "B", "C"):
+        models.add_whisky_to_tasting(tasting_id, models.save_whisky({"name": name}))
+    models.set_status(tasting_id, "registration")
+    code = models.get_tasting(tasting_id)["public_code"]
+    models.set_status(tasting_id, "round_nose")
+
+    # По ссылке — уже нельзя, и это правильно: случайный человек не должен
+    # вписаться в идущую дегустацию.
+    refused = client.post(f"/join/{code}", data={"name": "Мимо"}, follow_redirects=True)
+    assert "закрыта" in refused.text
+    assert models.list_participants(tasting_id) == []
+
+    page = admin.post(
+        f"/admin/tastings/{tasting_id}/participants",
+        data={"name": "Опоздавший", "contact": "@late"},
+        follow_redirects=True,
+    ).text
+    assert "Гость записан" in page
+    people = models.list_participants(tasting_id)
+    assert [p["name"] for p in people] == ["Опоздавший"]
+
+    # И раунд ему доступен сразу — иначе запись бессмысленна.
+    token = people[0]["join_token"]
+    assert "Раунд по запаху" in client.get(f"/me/{token}").text
+
+
+def test_nobody_is_added_to_a_finished_tasting(admin):
+    """Запись после итогов — это участник с нулём и без единого раунда."""
+    tasting_id = models.create_tasting("Первая", None, "class")
+    models.add_whisky_to_tasting(tasting_id, models.save_whisky({"name": "A"}))
+    for status in ("registration", "round_nose", "round_palate", "scoring"):
+        models.set_status(tasting_id, status)
+    page = admin.post(
+        f"/admin/tastings/{tasting_id}/participants",
+        data={"name": "Поздний"},
+        follow_redirects=True,
+    ).text
+    assert "закончена" in page
+    assert models.list_participants(tasting_id) == []

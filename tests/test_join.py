@@ -18,7 +18,7 @@ def bot(monkeypatch):
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", SECRET)
     monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "raikhinwhiskey_bot")
     monkeypatch.setattr(telegram, "_username", None)
-    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)) or True)
+    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text, **_: sent.append((chat_id, text)) or True)
     return sent
 
 

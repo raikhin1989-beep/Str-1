@@ -57,10 +57,13 @@ def apply(update: dict) -> str:
         f"{', @' + username if username else ''}",
     )
     if participant is None:
+        # Коротким таймаутом: с этого сервера сообщение всё равно не уйдёт,
+        # а привязка следующего гостя из той же пачки ждать не должна.
         telegram.send_message(
             chat_id,
             "Не нашёл, к кому вас привязать. Откройте ссылку регистрации ещё раз "
             "и нажмите кнопку «Привязать телеграм».",
+            timeout=telegram.NOTIFY_TIMEOUT,
         )
         return "чужой код"
 
@@ -69,5 +72,6 @@ def apply(update: dict) -> str:
         chat_id,
         f"Готово, {participant['name']}! Пришлю сюда итоги дегустации "
         f"«{tasting['title']}».",
+        timeout=telegram.NOTIFY_TIMEOUT,
     )
     return "привязка"

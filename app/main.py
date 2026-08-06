@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -106,6 +107,7 @@ def index(request: Request):
 
 TROUBLE = {
     404: ("Такой страницы нет", "Проверьте ссылку — возможно, она устарела или в ней опечатка."),
+    422: ("Ссылка не сработала", "Похоже, адрес неполный или в нём опечатка. Начните с главной."),
     409: ("Сейчас так нельзя", "Похоже, раунд уже закрыт или ещё не начался. Обновите страницу."),
     429: ("Слишком часто", "Подождите минуту и попробуйте снова."),
     500: ("Что-то сломалось", "Мы уже знаем: ошибка записана в журнал. Попробуйте обновить страницу."),
@@ -140,6 +142,20 @@ async def http_error(request: Request, exc: StarletteHTTPException):
     if not _wants_html(request):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     return _trouble(request, exc.status_code, str(exc.detail or ""))
+
+
+@app.exception_handler(RequestValidationError)
+async def bad_request(request: Request, exc: RequestValidationError):
+    """Кривой адрес или недостающий параметр.
+
+    Своей обработки у этого исключения не было, и FastAPI отвечал на него
+    JSON-простынёй с полем detail — тем самым, ради которого написан этот
+    раздел. Ловится это просто: /whisky/ask, открытый ссылкой (а не формой),
+    или /qr.svg без параметра. Гостю нужна страница, а не разбор запроса.
+    """
+    if not _wants_html(request):
+        return JSONResponse({"detail": exc.errors()}, status_code=422)
+    return _trouble(request, 422)
 
 
 @app.exception_handler(Exception)

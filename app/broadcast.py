@@ -43,7 +43,8 @@ def send_results(tasting_id: int, results_url: str) -> dict:
             report["unlinked"].append(row["name"])
             continue
         text = compose(row, scores.get(row["id"]), whiskies, top, total_points,
-                       tasting["title"], results_url, len(board))
+                       tasting["title"], results_url, len(board),
+                       models.category_title(tasting))
         if telegram.send_message(row["tg_chat_id"], text):
             models.mark_delivered(row["id"], KIND)
             report["sent"].append(row["name"])
@@ -81,7 +82,8 @@ def pending(tasting_id: int, results_url: str) -> list[dict]:
             "participant_id": row["id"],
             "chat_id": row["tg_chat_id"],
             "text": compose(row, scores.get(row["id"]), whiskies, top, total_points,
-                            tasting["title"], results_url, len(board)),
+                            tasting["title"], results_url, len(board),
+                            models.category_title(tasting)),
         }
         for row in board
         if row["tg_chat_id"] and row["id"] not in already
@@ -96,8 +98,14 @@ def latest_scored_tasting() -> int | None:
     return None
 
 
-def compose(row, score, whiskies, top, max_points, title, results_url, people) -> str:
-    """Личное сообщение. HTML — потому что send_message шлёт с parse_mode=HTML."""
+def compose(row, score, whiskies, top, max_points, title, results_url, people,
+            category_title: str = "класс") -> str:
+    """Личное сообщение. HTML — потому что send_message шлёт с parse_mode=HTML.
+
+    category_title — «класс» или «регион», смотря как заведена дегустация.
+    Строку «за класс» на дегустации по регионам гость читает как ошибку
+    в подсчёте, и на живом вечере именно так её и прочитали.
+    """
     name = html.escape(row["name"])
     lines = [
         f"<b>{html.escape(title)}</b> — итоги.",
@@ -105,7 +113,7 @@ def compose(row, score, whiskies, top, max_points, title, results_url, people) -
         f"{name}, ваше место: <b>{row['place']}</b> из {people}. "
         f"Очков: <b>{row['total']}</b> из {max_points}.",
         f"Нос {row['points_nose']}, вкус {row['points_palate']}, "
-        f"за класс {row['points_partial']}, бонусы {row['points_bonus']}.",
+        f"за {category_title} {row['points_partial']}, бонусы {row['points_bonus']}.",
     ]
 
     if score is not None:

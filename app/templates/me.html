@@ -43,8 +43,11 @@
       <tr>
         <td class="num">{{ s.sample_no }}</td>
         <td>{{ whiskies.get(s.truth_id, "—") }}</td>
-        <td>{% if s.nose_id == s.truth_id %}✓{% else %}{{ whiskies.get(s.nose_id, "—") }}{% endif %}</td>
-        <td>{% if s.palate_id == s.truth_id %}✓{% else %}{{ whiskies.get(s.palate_id, "—") }}{% endif %}</td>
+        {# Названия может не быть вовсе: гость отвечал одним классом (или
+           регионом). Тогда показываем то, что он назвал, — иначе в строке
+           прочерк, а в баллах число, и понять его нельзя. #}
+        <td>{% if s.nose_id == s.truth_id %}✓{% elif s.nose_id %}{{ whiskies.get(s.nose_id, "—") }}{% elif s.nose_category %}{{ s.nose_category }}{% else %}—{% endif %}</td>
+        <td>{% if s.palate_id == s.truth_id %}✓{% elif s.palate_id %}{{ whiskies.get(s.palate_id, "—") }}{% elif s.palate_category %}{{ s.palate_category }}{% else %}—{% endif %}</td>
         <td class="num">{{ s.points }}{% if s.consistent %} <span class="hint">(с бонусом)</span>{% endif %}</td>
       </tr>
       {% endfor %}

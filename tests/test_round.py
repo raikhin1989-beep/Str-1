@@ -376,22 +376,28 @@ def test_a_stale_form_does_not_land_in_the_next_round(client, tasting):
     models.set_status(tasting["id"], "round_palate")
     response = client.post(f"/me/{token}/submit", data=stale, follow_redirects=False)
 
-    assert response.status_code == 409
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/me/{token}?error=")
     assert models.get_answers(person, "palate") == {}, "чужой раунд не должен записаться"
 
 
 def test_the_guest_is_told_what_happened(client, tasting):
-    """Отказ без объяснения посреди вечера — это тупик."""
+    """Отказ без объяснения посреди вечера — это тупик.
+
+    И страница ошибки здесь тоже тупик: из ссылок на ней только «на главную».
+    Гостя возвращаем на его же страницу — там уже идёт нужный раунд.
+    """
     token = tasting["tokens"][0]
     models.set_status(tasting["id"], "round_palate")
     page = client.post(
         f"/me/{token}/submit",
         data={"round": "nose", "sample_1": ""},
         headers={"Accept": "text/html"},
-        follow_redirects=False,
+        follow_redirects=True,
     )
     assert "ведущий перешёл к другому раунду" in page.text
     assert "по вкусу" in page.text
+    assert "Образец 1" in page.text, "форма нужного раунда должна быть тут же"
 
 
 def test_a_stale_draft_is_refused_too(client, tasting):
@@ -630,3 +636,46 @@ def test_the_whisky_of_the_night_follows_the_palate(tasting):
     # А правка тегов оценку не трогает.
     models.save_round_draft(me, "palate", {}, {}, {1: "дым"})
     assert models.get_ratings(me)[1]["score"] == 90
+
+
+def test_the_personal_table_shows_what_a_region_answer_was(admin, client, regions):
+    """Иначе в строке прочерк, а в баллах число — и понять его нельзя."""
+    token = regions["tokens"][0]
+    for round_name in ("nose", "palate"):
+        client.post(
+            f"/me/{token}/submit",
+            data={"round": round_name} | {f"class_{n}": "Speyside" for n in (1, 2, 3)},
+            follow_redirects=True,
+        )
+        if round_name == "nose":
+            models.set_status(regions["id"], "round_palate")
+    admin.post(
+        f"/admin/tastings/{regions['id']}/status",
+        data={"status": "scoring"},
+        follow_redirects=True,
+    )
+    page = client.get(f"/me/{token}").text
+    assert "Ваш результат" in page
+    assert page.count("Speyside") >= 3, "названного региона в разборе не видно"
+
+
+def test_a_region_only_answer_counts_as_finished_for_the_tie_break(regions):
+    """Тай-брейк смотрел только в названия: гость «не отправлял вовсе»
+    и при равенстве очков всегда оказывался ниже — за то, чего не делал."""
+    first, second = regions["people"]
+    models.set_status(regions["id"], "round_palate")
+    for person in (first, second):
+        models.save_round_draft(person, "palate", {}, categories={n: "Speyside" for n in (1, 2, 3)})
+        models.submit_round(person, "palate")
+    finished = models.palate_finished_at(regions["id"])
+    assert set(finished) == {first, second}
+    assert all(finished.values()), "время отправки должно быть известно у обоих"
+
+
+def test_a_category_from_outside_the_list_is_cut_to_size(regions):
+    """Список — это <select>, но POST принимает что угодно и любой длины."""
+    me = regions["people"][0]
+    models.save_round_draft(me, "nose", {}, categories={1: "Ы" * 5000})
+    stored = models.get_categories(me, "nose")[1]
+    assert len(stored) == models.MAX_CATEGORY_LENGTH
+    assert models.score_tasting(regions["id"])[me].points_partial == 0, "мусор не стоит баллов"

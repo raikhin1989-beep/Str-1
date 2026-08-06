@@ -12,7 +12,7 @@ def sent(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:тест")
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "secret-0123456789")
     monkeypatch.setattr(
-        telegram, "send_message", lambda chat_id, text: box.append((chat_id, text)) or True
+        telegram, "send_message", lambda chat_id, text, **_: box.append((chat_id, text)) or True
     )
     return box
 
@@ -91,7 +91,7 @@ def test_a_failed_send_is_retried_next_time(finished, monkeypatch):
     first = broadcast.send_results(finished["id"], URL)
     assert first["failed"] == ["Женя"] and first["sent"] == ["Саша"]
 
-    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text: True)
+    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text, **_: True)
     second = broadcast.send_results(finished["id"], URL)
     assert second["sent"] == ["Женя"], "повтор идёт только к тому, кому не дошло"
     assert second["skipped"] == ["Саша"]
@@ -148,3 +148,26 @@ def test_a_ready_made_text_is_offered_for_manual_sending(admin, finished):
     assert "отправьте текст сами" in page
     assert "1. Саша — " in page
     assert "/results/" in page
+
+
+def test_the_message_names_the_region_when_the_tasting_is_by_region(monkeypatch):
+    """«За класс» в личном сообщении — то же враньё, что и в итогах."""
+    tasting_id = models.create_tasting("По регионам", None, "region")
+    for name in ("A", "B", "C"):
+        models.add_whisky_to_tasting(
+            tasting_id, models.save_whisky({"name": name, "region": "Speyside"})
+        )
+    models.set_status(tasting_id, "registration")
+    token = models.register_participant(tasting_id, "Саша")
+    models.link_telegram(token, 111, "sasha")
+    person = models.get_participant_by_token(token)["id"]
+    models.set_status(tasting_id, "round_nose")
+    models.save_round_draft(person, "nose", {}, categories={n: "Speyside" for n in (1, 2, 3)})
+    models.submit_round(person, "nose")
+    models.set_status(tasting_id, "round_palate")
+    models.set_status(tasting_id, "scoring")
+    models.compute_results(tasting_id)
+
+    text = broadcast.pending(tasting_id, "https://example.org/results/x")[0]["text"]
+    assert "за регион" in text
+    assert "за класс" not in text
