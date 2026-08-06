@@ -7,14 +7,14 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
+from app import templating
 from app import ai, auth, backup, broadcast, errors, models, telegram
 from app.config import admin_password, fallback_base_url, public_base_url
 from app.db import connect, log_action
 
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+templates = templating.build()
 
 router = APIRouter(prefix="/admin")
 
@@ -459,6 +459,16 @@ def whiskies_page(request: Request, q: str = "", error: str = "", ok: str = ""):
 @router.post("/whiskies", dependencies=[Depends(require_admin)])
 async def create_whisky(request: Request):
     form = dict(await request.form())
+    # Второй виски с тем же названием — ловушка для гостя: в списке ответов
+    # они неразличимы, и за верно названный виски он получит ноль, выбрав
+    # не тот. Отправляем на уже заведённую запись: почти всегда человек
+    # хотел именно её.
+    twin = models.whisky_by_name(str(form.get("name") or ""))
+    if twin is not None:
+        return _redirect(
+            f"/admin/whiskies/{twin['id']}"
+            f"?error=«{twin['name']}» уже есть в справочнике — вот эта запись"
+        )
     try:
         whisky_id = models.save_whisky(form)
     except ValueError as err:
@@ -476,6 +486,10 @@ def import_whisky_from_ai(cache_key: str = Form(...)):
     card = ai.cached_card(cache_key)
     if card is None:
         return _redirect("/admin/whiskies?error=Карточка не найдена, распознайте заново")
+    twin = models.whisky_by_name(str(card.get("name") or ""))
+    if twin is not None:
+        # Уже заведён — второй копией справочник только испортим.
+        return _redirect(f"/whisky?q={quote(str(twin['name']))}&added={twin['id']}")
     try:
         whisky_id = models.save_whisky(card, source="ai")
     except ValueError as err:

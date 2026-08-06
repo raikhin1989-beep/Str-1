@@ -1,5 +1,7 @@
 """Раунд: расстановка образцов, черновик, отправка, счётчик сдавших."""
 
+import re
+
 import pytest
 
 from app import models
@@ -679,3 +681,24 @@ def test_a_category_from_outside_the_list_is_cut_to_size(regions):
     stored = models.get_categories(me, "nose")[1]
     assert len(stored) == models.MAX_CATEGORY_LENGTH
     assert models.score_tasting(regions["id"])[me].points_partial == 0, "мусор не стоит баллов"
+
+
+def test_the_choice_list_is_grouped_by_what_earns_the_partial_point(client, regions):
+    """Гостю написано «называйте похожий» — похожий он должен уметь найти.
+
+    Список всегда группировался по классам. На дегустации по регионам это
+    значит, что совет невыполним: соседей по региону в списке не видно.
+    """
+    models.save_whisky({"name": "Lagavulin 16", "wclass": "односолодовый скотч", "region": "Islay"})
+    page = client.get(f"/me/{regions['tokens'][0]}").text
+    groups = re.findall(r'<optgroup label="([^"]+)"', page)
+    assert "Speyside" in groups and "Islay" in groups
+    assert "односолодовый скотч" not in groups
+
+
+def test_blends_are_grouped_apart_and_last(regions):
+    """У купажа региона нет вовсе — но из списка он пропасть не должен."""
+    models.save_whisky({"name": "Chivas Regal 12", "wclass": "купажированный скотч"})
+    groups = [name for name, _ in models.grouped_choices(models.list_whiskies(), "region")]
+    assert groups[-1] == models.NO_CATEGORY
+    assert groups[:-1] == sorted(groups[:-1], key=str.casefold)

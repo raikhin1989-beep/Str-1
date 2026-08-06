@@ -5,14 +5,12 @@
 не знают о связи виски с дегустацией.
 """
 
-from pathlib import Path
-
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.templating import Jinja2Templates
 
+from app import templating
 from app import ai, auth, models
 
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+templates = templating.build()
 
 router = APIRouter()
 

@@ -68,6 +68,7 @@ def category_title(tasting) -> str:
     """
     return "регион" if tasting["category_level"] == "region" else "класс"
 
+
 # Из чего участник выбирает ответ. Справочник целиком — сложнее и честнее:
 # частичный балл за класс начинает что-то значить, потому что можно назвать
 # виски, которого на столе нет. Только налитое — режим полегче.
@@ -275,6 +276,28 @@ def save_whisky(data: dict, whisky_id: int | None = None, source: str = "manual"
             [values[k] for k in WHISKY_FIELDS] + [whisky_id],
         )
         return whisky_id
+
+
+def whisky_by_name(name: str) -> sqlite3.Row | None:
+    """Запись с таким же названием — или None.
+
+    Ловушка, ради которой это написано: два одинаковых названия в справочнике
+    неразличимы в списке ответов. Гость видит «Talisker 10» дважды, выбирает
+    не тот и получает ноль за верно названный виски. Сам он объяснить это
+    не сможет, а ведущий — тем более.
+
+    Сравниваем в Python: LIKE и COLLATE NOCASE в SQLite знают только латиницу,
+    и «Талискер» с «талискер» для них разные строки.
+    """
+    wanted = " ".join((name or "").split()).casefold()
+    if not wanted:
+        return None
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM whisky").fetchall()
+    for row in rows:
+        if " ".join((row["name"] or "").split()).casefold() == wanted:
+            return row
+    return None
 
 
 def whisky_usage(whisky_id: int) -> list[str]:
@@ -577,7 +600,10 @@ def round_choices(tasting_id: int) -> list[sqlite3.Row]:
         with connect() as conn:
             return by_name(
                 conn.execute(
-                    "SELECT w.id, w.name, w.wclass FROM tasting_whisky tw"
+                    # region нужен для группировки списка на дегустации
+                    # по регионам — без него все варианты сваливаются
+                    # в одну группу «без региона».
+                    "SELECT w.id, w.name, w.wclass, w.region FROM tasting_whisky tw"
                     " JOIN whisky w ON w.id = tw.whisky_id"
                     " WHERE tw.tasting_id = ?",
                     (tasting_id,),
@@ -586,19 +612,36 @@ def round_choices(tasting_id: int) -> list[sqlite3.Row]:
     return list_whiskies()
 
 
-def grouped_choices(rows) -> list[tuple[str, list]]:
-    """Те же варианты, разложенные по классам — для <optgroup>.
+NO_CATEGORY = "без региона"
+
+
+def grouped_choices(rows, level: str = "class") -> list[tuple[str, list]]:
+    """Те же варианты, разложенные на группы — для <optgroup>.
 
     Справочник разросся до сотни с лишним названий, и плоский список стал
-    свитком: гость крутит его в темноте, с бокалом в руке. Разложенный по
-    классам он листается глазами, а заодно показывает сами классы — то, за
-    что даётся частичный балл (docs/SCORING.md). Порядок групп — как в
-    WHISKY_CLASSES, а не по алфавиту: скотч сверху, «прочее» в конце.
+    свитком: гость крутит его в темноте, с бокалом в руке. Разложенный
+    по группам он листается глазами.
+
+    Группы — по тому, за что даётся частичный балл (docs/SCORING.md), а это
+    зависит от дегустации. Пока здесь всегда стояли классы, дегустация
+    по регионам получалась злой: гостю написано «не угадали розлив —
+    называйте похожий», похожий здесь значит «того же региона», а список
+    разложен по классам, и найти в нём соседа по региону нельзя никак.
+
+    Порядок классов — как в WHISKY_CLASSES, а не по алфавиту: скотч сверху,
+    «прочее» в конце. Регионы по алфавиту, а «без региона» — последним:
+    там купажи, у которых региона нет по существу.
     """
+    field = "region" if level == "region" else "wclass"
+    default = NO_CATEGORY if level == "region" else "прочее"
     buckets: dict[str, list] = {}
     for row in rows:
-        wclass = (row["wclass"] or "прочее").strip() or "прочее"
-        buckets.setdefault(wclass, []).append(row)
+        value = ((row[field] if field in row.keys() else None) or "").strip() or default
+        buckets.setdefault(value, []).append(row)
+    if level == "region":
+        rest = buckets.pop(NO_CATEGORY, None)
+        groups = sorted(buckets.items(), key=lambda pair: pair[0].casefold())
+        return groups + ([(NO_CATEGORY, rest)] if rest else [])
     known = [(c, buckets.pop(c)) for c in WHISKY_CLASSES if c in buckets]
     # Класс, которого нет в словаре, — заведён руками до того, как список
     # устоялся. Не теряем его: без группы виски пропал бы из вариантов ответа.

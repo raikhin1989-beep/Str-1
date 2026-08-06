@@ -113,3 +113,27 @@ def test_the_round_page_lists_the_whole_catalogue(client):
     assert 'label="японский"' in page
     for row in models.list_whiskies():
         assert f'>{escape(row["name"])}</option>' in page
+
+
+def test_a_second_whisky_with_the_same_name_is_refused(admin):
+    """Два одинаковых названия в списке ответов неразличимы.
+
+    Гость выбирает не тот и получает ноль за верно названный виски —
+    объяснить это не сможет ни он, ни ведущий.
+    """
+    admin.post(
+        "/admin/whiskies",
+        data={"name": "Кемля Односолодовая", "wclass": "односолодовый (не Шотландия)"},
+        follow_redirects=True,
+    )
+    # Тот же виски, набранный иначе: лишние пробелы и другой регистр.
+    page = admin.post(
+        "/admin/whiskies",
+        data={"name": "  кемля   ОДНОСОЛОДОВАЯ ", "wclass": "односолодовый (не Шотландия)"},
+        follow_redirects=True,
+    ).text
+    assert "уже есть в справочнике" in page
+    same = [w for w in models.list_whiskies() if w["name"].casefold().startswith("кемля")]
+    assert len(same) == 1, "второй записи появиться не должно"
+    # Сравнение не по-английски: LIKE и NOCASE в SQLite кириллицу не знают.
+    assert models.whisky_by_name("КЕМЛЯ ОДНОСОЛОДОВАЯ")["id"] == same[0]["id"]

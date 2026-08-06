@@ -7,14 +7,13 @@
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import templating
 from app import ai, errors, telegram
 from app.admin import router as admin_router
 from app.config import admin_password
@@ -25,8 +24,7 @@ from app.public import router as public_router
 
 log = logging.getLogger("str1.app")
 
-BASE_DIR = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates = templating.build()
 
 
 @asynccontextmanager

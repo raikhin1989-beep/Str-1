@@ -59,6 +59,15 @@
     </li>
     {% endfor %}
   </ul>
+  {# Нашлось похожее, но не то — обычное дело: справочник неполон. Без этой
+     кнопки оставался тупик: спросить у ИИ можно было только тогда, когда
+     не находилось ничего, то есть подобрав запрос похуже. #}
+  {% if ai_available %}
+  <form method="post" action="/whisky/ask" class="inline">
+    <input type="hidden" name="q" value="{{ query }}">
+    <button class="link" type="submit">Не то? Спросить у ИИ →</button>
+  </form>
+  {% endif %}
 {% elif searched %}
   <section class="card">
     <p>В справочнике по запросу «{{ query }}» ничего нет.</p>

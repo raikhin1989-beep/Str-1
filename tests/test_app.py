@@ -105,3 +105,28 @@ def test_json_callers_still_get_json(client):
     response = client.get("/qr.svg")
     assert response.status_code == 422
     assert "detail" in response.json()
+
+
+def test_russian_counting_of_points():
+    """«24 баллов» на странице итогов — число там считается из состава."""
+    from app.templating import plural
+
+    forms = ("балл", "балла", "баллов")
+    assert [f"{n} {plural(n, *forms)}" for n in (1, 2, 5, 11, 12, 14, 21, 24, 30, 101, 111)] == [
+        "1 балл", "2 балла", "5 баллов", "11 баллов", "12 баллов", "14 баллов",
+        "21 балл", "24 балла", "30 баллов", "101 балл", "111 баллов",
+    ]
+
+
+def test_the_results_page_counts_points_in_russian(client, admin):
+    from app import models
+
+    tasting_id = models.create_tasting("Первая", None, "class")
+    for name in ("A", "B", "C"):
+        models.add_whisky_to_tasting(tasting_id, models.save_whisky({"name": name}))
+    for status in ("registration", "round_nose", "round_palate", "scoring"):
+        models.set_status(tasting_id, status)
+    code = models.get_tasting(tasting_id)["public_code"]
+    page = client.get(f"/results/{code}").text
+    assert "24 балла" in page
+    assert "баллов" not in page.split("Максимум")[1][:40]

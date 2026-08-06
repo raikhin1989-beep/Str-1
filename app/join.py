@@ -3,20 +3,19 @@
 import io
 import json
 import logging
-from pathlib import Path
 
 import qrcode
 import qrcode.image.svg
 from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 
+from app import templating
 from app import auth, limits, models, scoring, telegram, telegram_link
 from app.config import public_base_url
 
 log = logging.getLogger("str1.join")
 
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+templates = templating.build()
 
 router = APIRouter()
 
@@ -181,7 +180,7 @@ def participant_page(request: Request, token: str, error: str = ""):
             "round_title": models.ROUND_TITLES[round_name],
             "samples": models.sample_numbers(tasting["id"]),
             "choices": choices,
-            "choice_groups": models.grouped_choices(choices),
+            "choice_groups": models.grouped_choices(choices, tasting["category_level"]),
             "wide_choice": tasting["answer_scope"] == "catalogue",
             "answers": answers,
             # Прямой ответ «а какой это хотя бы класс»: даёт тот же частичный
